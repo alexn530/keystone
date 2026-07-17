@@ -140,6 +140,7 @@ export function CmdbDashboard() {
   const [lastSync, setLastSync] = useState("—");
   const [queuedFix, setQueuedFix] = useState<HealthFix | null>(null);
   const [actionMessage, setActionMessage] = useState("");
+  const [instanceHost, setInstanceHost] = useState<string | null>(null);
 
   async function loadData() {
     setApiState("connecting");
@@ -156,6 +157,12 @@ export function CmdbDashboard() {
   useEffect(() => {
     const timer = window.setTimeout(() => { void loadData(); }, 0);
     return () => window.clearTimeout(timer);
+  }, []);
+  useEffect(() => {
+    fetch("/api/cmdb/instance", { cache: "no-store" })
+      .then(response => (response.ok ? response.json() : null))
+      .then(data => { if (data && typeof data.host === "string" && data.host) setInstanceHost(data.host); })
+      .catch(() => {});
   }, []);
   useEffect(() => { window.scrollTo({ top: 0, behavior: "smooth" }); }, [section]);
   useEffect(() => {
@@ -213,7 +220,7 @@ export function CmdbDashboard() {
     <main className="main-content">
       <header className="topbar">
         <div><span className="eyebrow">{section === "import" ? "DATA INTAKE" : "MODERNIZATION RUN"}</span><strong>{section === "import" ? "NEW MIGRATION RUN" : "CMDB-BATCH-019"}</strong></div>
-        <div className="top-actions"><span className="instance"><span className="live-dot" /> dev48291.service-now.com</span><button className="ghost-button"><Icon name="clock" size={15} /> Event ledger</button><div className="avatar">NS</div></div>
+        <div className="top-actions"><span className="instance"><span className={instanceHost ? "live-dot" : "live-dot demo"} /> {instanceHost ?? "demo mode"}</span><button className="ghost-button"><Icon name="clock" size={15} /> Event ledger</button><div className="avatar">NS</div></div>
       </header>
 
       {section === "import" && <ImportGatewayView onOpenRun={() => setSection("comprehend")} />}

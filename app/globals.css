@@ -83,6 +83,7 @@ button { color: inherit; }
 .top-actions { display: flex; align-items: center; gap: 12px; }
 .instance { display: flex; align-items: center; gap: 8px; color: var(--muted); font: 10.5px var(--mono); }
 .live-dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px rgba(89, 197, 139, .65); }
+.live-dot.demo { background: var(--faint); box-shadow: none; }
 .ghost-button, .filter-button { height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 13px; border: 1px solid var(--line-strong); background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; transition: .2s ease; }
 .ghost-button:hover, .filter-button:hover, .filter-button.active { color: var(--ink); border-color: rgba(199, 243, 77, .45); background: rgba(199, 243, 77, .05); }
 .avatar { width: 31px; height: 31px; display: grid; place-items: center; background: var(--warm); color: #181b16; border-radius: 50%; font-size: 10px; font-weight: 700; }
