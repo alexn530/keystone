@@ -183,7 +183,7 @@ function ComprehendView(props: {
     </section>
 
     <section className="visual-grid">
-      <div className="panel sankey-panel"><div className="panel-heading compact"><div><span className="section-index">02</span><div><h2>Record flow</h2><p>Source to class to outcome</p></div></div><span className="panel-stat">1,248 RECORDS</span></div><SankeyVisual /></div>
+      <div className="panel sankey-panel"><div className="panel-heading compact"><div><span className="section-index">02</span><div><h2>Record flow</h2><p>Source to class to outcome</p></div></div><span className="panel-stat">{apiState === "live" ? `${allCis.length.toLocaleString()} RECORDS` : "1,248 RECORDS"}</span></div><SankeyVisual cis={allCis} live={apiState === "live"} /></div>
       <div className="panel graph-panel"><div className="panel-heading compact"><div><span className="section-index">03</span><div><h2>Relationship graph</h2><p>CIs appear as evidence lands</p></div></div><span className="panel-stat"><i className="live-dot" /> LIVE</span></div><RelationshipGraph cis={allCis} relationships={relationships} /></div>
     </section>
 
@@ -202,7 +202,81 @@ function Kpi({ label, value, delta, tone, icon }: { label: string; value: string
   return <div className={`kpi-card ${tone}`}><div className="kpi-top"><span>{label}</span><span className="kpi-icon"><Icon name={icon} size={17} /></span></div><strong>{value}</strong><div className="kpi-foot"><span>{delta}</span><i /></div></div>;
 }
 
-function SankeyVisual() {
+const sankeyOutcomeMeta = [
+  { label: "Published", ops: ["INSERT", "UPDATE"] as Operation[], node: "lime-node", bg: "lime-bg", color: "var(--lime)" },
+  { label: "Merged", ops: ["NO_CHANGE"] as Operation[], node: "green-node", bg: "green-bg", color: "var(--green)" },
+  { label: "Review", ops: ["REVIEW", "INSERT_AS_INCOMPLETE"] as Operation[], node: "amber-node", bg: "amber-bg", color: "var(--amber)" },
+  { label: "Error", ops: ["ERROR"] as Operation[], node: "coral-node", bg: "coral-bg", color: "var(--coral)" },
+];
+const sankeySourceColors = ["#55b98a", "#799bbd", "#b17fa4", "#d78a6c"];
+const sankeyMetaFor = (label: string) => sankeyOutcomeMeta.find(meta => meta.label === label) ?? sankeyOutcomeMeta[0];
+const trimSankeyLabel = (value: string) => value.length > 15 ? `${value.slice(0, 14)}…` : value;
+
+type SankeyNode = { label: string; count: number; y: number; h: number; out: number; in: number };
+
+function rankSankeyEntries(labels: string[], keep: number): [string, number][] {
+  const counts = new Map<string, number>();
+  for (const label of labels) counts.set(label, (counts.get(label) || 0) + 1);
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  const entries = ranked.slice(0, keep);
+  const rest = ranked.slice(keep).reduce((sum, [, count]) => sum + count, 0);
+  if (rest) entries.push(["Other", rest]);
+  return entries;
+}
+
+function layoutSankeyNodes(entries: [string, number][], total: number): SankeyNode[] {
+  let y = 36;
+  return entries.map(([label, count]) => {
+    const h = Math.max(10, (count / total) * 170);
+    const node: SankeyNode = { label, count, y, h, out: 0, in: 0 };
+    y += h + 10;
+    return node;
+  });
+}
+
+function sankeyRibbons(from: SankeyNode[], to: SankeyNode[], pairs: [string, string][], total: number, x1: number, x2: number, color: (src: SankeyNode, dst: SankeyNode) => string) {
+  const counts = new Map<string, number>();
+  for (const [a, b] of pairs) counts.set(`${a}|${b}`, (counts.get(`${a}|${b}`) || 0) + 1);
+  const mid = (x2 - x1) * 0.45;
+  const ribbons: { d: string; w: number; c: string }[] = [];
+  for (const src of from) for (const dst of to) {
+    const count = counts.get(`${src.label}|${dst.label}`);
+    if (!count) continue;
+    const w = Math.max(2, (count / total) * 170);
+    const y1 = src.y + src.out + w / 2; src.out += w;
+    const y2 = dst.y + dst.in + w / 2; dst.in += w;
+    ribbons.push({ d: `M${x1} ${y1} C${x1 + mid} ${y1} ${x2 - mid} ${y2} ${x2} ${y2}`, w, c: color(src, dst) });
+  }
+  return ribbons;
+}
+
+function LiveSankey({ cis }: { cis: ConfigurationItem[] }) {
+  const total = cis.length;
+  const sourceNodes = layoutSankeyNodes(rankSankeyEntries(cis.map(ci => ci.source), 3), total);
+  const classNodes = layoutSankeyNodes(rankSankeyEntries(cis.map(ci => ci.className), 3), total);
+  const keptSources = new Set(sourceNodes.map(node => node.label));
+  const keptClasses = new Set(classNodes.map(node => node.label));
+  const sourceLabel = (ci: ConfigurationItem) => keptSources.has(ci.source) ? ci.source : "Other";
+  const classLabel = (ci: ConfigurationItem) => keptClasses.has(ci.className) ? ci.className : "Other";
+  const outcomeLabel = (ci: ConfigurationItem) => (sankeyOutcomeMeta.find(meta => meta.ops.includes(ci.operation)) ?? sankeyOutcomeMeta[0]).label;
+  const outcomeNodes = layoutSankeyNodes(
+    sankeyOutcomeMeta.map(meta => [meta.label, cis.filter(ci => outcomeLabel(ci) === meta.label).length] as [string, number]).filter(([, count]) => count > 0),
+    total,
+  );
+  const stage1 = sankeyRibbons(sourceNodes, classNodes, cis.map(ci => [sourceLabel(ci), classLabel(ci)]), total, 88, 292, src => sankeySourceColors[sourceNodes.indexOf(src) % sankeySourceColors.length]);
+  const stage2 = sankeyRibbons(classNodes, outcomeNodes, cis.map(ci => [classLabel(ci), outcomeLabel(ci)]), total, 310, 506, (_src, dst) => sankeyMetaFor(dst.label).color);
+
+  return <div className="sankey"><div className="sankey-head"><span>SOURCE</span><span>AI CLASS</span><span>IRE OUTCOME</span></div><svg viewBox="0 0 590 250" role="img" aria-label="Records flowing from source systems to AI classes and IRE outcomes">
+    {stage1.map((ribbon, i) => <path key={`s1-${i}`} d={ribbon.d} stroke={ribbon.c} strokeWidth={ribbon.w} opacity=".42" fill="none" />)}
+    {stage2.map((ribbon, i) => <path key={`s2-${i}`} d={ribbon.d} stroke={ribbon.c} strokeWidth={ribbon.w} opacity=".42" fill="none" />)}
+    <g className="sankey-nodes source">{sourceNodes.map(node => <g key={node.label}><rect x="70" y={node.y} width="18" height={node.h} /><text x="64" y={node.y + 12} textAnchor="end">{trimSankeyLabel(node.label)}</text></g>)}</g>
+    <g className="sankey-nodes classes">{classNodes.map(node => <g key={node.label}><rect x="292" y={node.y} width="18" height={node.h} /><text x="286" y={node.y + 12} textAnchor="end">{trimSankeyLabel(node.label)}</text></g>)}</g>
+    <g className="sankey-nodes outcomes">{outcomeNodes.map(node => <g key={node.label}><rect x="506" y={node.y} width="18" height={node.h} className={sankeyMetaFor(node.label).node} /><text x="530" y={node.y + 12}>{node.label}</text></g>)}</g>
+  </svg><div className="sankey-legend">{outcomeNodes.map(node => <span key={node.label}><i className={sankeyMetaFor(node.label).bg} /> {node.label} {node.count.toLocaleString()}</span>)}</div></div>;
+}
+
+function SankeyVisual({ cis, live }: { cis: ConfigurationItem[]; live: boolean }) {
+  if (live && cis.length) return <LiveSankey cis={cis} />;
   const paths = [
     ["M88 48 C180 48 202 44 292 55", 18, "var(--coral)"], ["M88 57 C180 62 210 92 292 98", 13, "var(--amber)"],
     ["M88 124 C175 122 207 77 292 70", 15, "#55b98a"], ["M88 134 C180 142 215 142 292 141", 10, "#799bbd"],
