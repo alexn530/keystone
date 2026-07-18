@@ -14,6 +14,8 @@ import {
   mockTimeline,
 } from "./cmdb-data";
 
+import { normalizeCis, normalizeHealth, normalizeRelationships, normalizeTimeline } from "./lib/cmdb/bridge-normalizers";
+
 import { Icon, type IconName } from "./icons";
 import { LiveOpsView } from "./live-view";
 import { AgentHrView } from "./hr-view";
@@ -23,92 +25,6 @@ type ApiState = "connecting" | "live" | "demo";
 type Section = "import" | "comprehend" | "live" | "hr" | "prioritize" | "remediate";
 
 const steps = ["Intake", "Staging", "AI read", "Confidence gate", "IRE", "CMDB", "Event log"];
-
-function arrayFromPayload(payload: unknown): unknown[] {
-  if (Array.isArray(payload)) return payload;
-  if (!payload || typeof payload !== "object") return [];
-  const value = payload as Record<string, unknown>;
-  for (const key of ["result", "data", "items", "records", "cis", "events", "relationships"]) {
-    if (Array.isArray(value[key])) return value[key] as unknown[];
-    if (value[key] && typeof value[key] === "object") {
-      const nested = arrayFromPayload(value[key]);
-      if (nested.length) return nested;
-    }
-  }
-  return [];
-}
-
-function str(value: unknown, fallback = "—") { return value === undefined || value === null || value === "" ? fallback : String(value); }
-function num(value: unknown, fallback = 0) { const result = Number(value); return Number.isFinite(result) ? result : fallback; }
-function confidence(value: unknown, fallback = 0) { const parsed = num(value, fallback); return parsed > 1 ? parsed / 100 : parsed; }
-function operation(value: unknown): Operation {
-  const normalized = str(value, "NO_CHANGE").toUpperCase().replaceAll(" ", "_") as Operation;
-  return ["INSERT", "UPDATE", "NO_CHANGE", "INSERT_AS_INCOMPLETE", "REVIEW", "ERROR"].includes(normalized) ? normalized : "NO_CHANGE";
-}
-
-function normalizeCis(payload: unknown): ConfigurationItem[] {
-  return arrayFromPayload(payload).map((item, index) => {
-    const row = item as Record<string, unknown>;
-    const conf = confidence(row.confidence ?? row.mapping_confidence, 0.9);
-    const op = operation(row.operation ?? row.ire_operation);
-    const status = op === "REVIEW" ? "review" : op === "INSERT_AS_INCOMPLETE" ? "incomplete" : "live";
-    return {
-      id: str(row.id ?? row.sys_id ?? row.ci_id, `CI-${index + 1}`),
-      name: str(row.name ?? row.ci_name ?? row.host_name, `Unnamed CI ${index + 1}`),
-      className: str(row.className ?? row.class ?? row.sys_class_name, "Unclassified"),
-      ip: str(row.ip ?? row.ip_address), source: str(row.source ?? row.discovery_source, "Migration Pipeline"),
-      operation: op, confidence: conf, health: num(row.health ?? row.health_score, Math.round(conf * 100)),
-      updatedAt: str(row.updatedAt ?? row.updated_at ?? row.sys_updated_on, "Just now"), status,
-      provenance: Array.isArray(row.provenance) ? (row.provenance as ConfigurationItem["provenance"]) : [
-        { label: "Source", value: str(row.source ?? row.discovery_source, "Migration Pipeline") },
-        { label: "AI classification", value: str(row.className ?? row.class ?? row.sys_class_name, "Unclassified") },
-        { label: "Confidence gate", value: `${Math.round(conf * 100)}%` },
-        { label: "IRE result", value: op },
-      ],
-    };
-  });
-}
-
-function normalizeTimeline(payload: unknown): TimelineEvent[] {
-  return arrayFromPayload(payload).map((item, index) => {
-    const row = item as Record<string, unknown>; const conf = confidence(row.confidence, 0);
-    return {
-      id: str(row.id ?? row.sys_id, `EV-${index + 1}`), seq: num(row.seq ?? row.sequence, index + 1),
-      step: Math.min(7, Math.max(1, num(row.step, (index % 7) + 1))), name: str(row.name ?? row.event_name, steps[index % 7]),
-      recordName: str(row.recordName ?? row.record_name ?? row.ci_name, "Record"), className: str(row.className ?? row.class ?? row.ci_class, "Unclassified"),
-      operation: operation(row.operation), source: str(row.source, "Migration Pipeline"), confidence: conf,
-      time: str(row.time ?? row.created_at ?? row.sys_created_on, "Just now"), status: (str(row.status, "complete") as TimelineEvent["status"]),
-      reasoning: str(row.reasoning ?? row.detail ?? row.message, "Event recorded by the migration pipeline."),
-    };
-  }).sort((a, b) => a.seq - b.seq);
-}
-
-function normalizeRelationships(payload: unknown): Relationship[] {
-  return arrayFromPayload(payload).map((item, index) => {
-    const row = item as Record<string, unknown>;
-    return { id: str(row.id ?? row.sys_id, `REL-${index + 1}`), source: str(row.source ?? row.parent ?? row.from), target: str(row.target ?? row.child ?? row.to), type: str(row.type ?? row.relationship_type, "Depends on"), confidence: confidence(row.confidence, 0.9) };
-  });
-}
-
-function normalizeHealth(payload: unknown): HealthData {
-  const outer = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
-  const raw = ((outer.result ?? outer.data ?? outer.health ?? outer) || {}) as Record<string, unknown>;
-  const fixesRaw = (raw.fixes ?? raw.recommendations ?? raw.priorities) as unknown;
-  const fixes = arrayFromPayload(fixesRaw).map((item, index) => {
-    const row = item as Record<string, unknown>;
-    return { id: str(row.id, `FIX-${index + 1}`), rank: num(row.rank, index + 1), title: str(row.title ?? row.name, "Recommended fix"), description: str(row.description ?? row.reason), impact: num(row.impact ?? row.score_impact, 1), affected: num(row.affected ?? row.count, 0), tool: str(row.tool ?? row.agent, "IRE advisor"), severity: str(row.severity, "medium") as HealthFix["severity"] };
-  });
-  return {
-    score: num(raw.score ?? raw.health_score, mockHealth.score), grade: str(raw.grade, mockHealth.grade),
-    ciCount: num(raw.ciCount ?? raw.ci_count ?? raw.total_cis, mockHealth.ciCount),
-    duplicatesMerged: num(raw.duplicatesMerged ?? raw.duplicates_merged ?? raw.duplicates_avoided, mockHealth.duplicatesMerged),
-    reviewCount: num(raw.reviewCount ?? raw.review_count ?? raw.pending_review, mockHealth.reviewCount),
-    relationshipCount: num(raw.relationshipCount ?? raw.relationship_count ?? raw.relationships, mockHealth.relationshipCount),
-    completeness: num(raw.completeness, mockHealth.completeness), correctness: num(raw.correctness, mockHealth.correctness),
-    compliance: num(raw.compliance, mockHealth.compliance), duplicateRate: num(raw.duplicateRate ?? raw.duplicate_rate, mockHealth.duplicateRate),
-    staleRecords: num(raw.staleRecords ?? raw.stale_records, mockHealth.staleRecords), fixes: fixes.length ? fixes : mockHealth.fixes,
-  };
-}
 
 async function readEndpoint(resource: string) {
   const response = await fetch(`/api/cmdb/${resource}`, { cache: "no-store" });
@@ -121,6 +37,7 @@ function OperationPill({ value }: { value: Operation }) {
 }
 
 function Confidence({ value }: { value: number }) {
+  if (value <= 0) return <div className="confidence"><span className="confidence-dot warn" /><span>Pending</span></div>;
   const pct = Math.round(value * 100); const tone = pct >= 95 ? "good" : pct >= 75 ? "warn" : "bad";
   return <div className="confidence"><span className={`confidence-dot ${tone}`} /><span>{pct}%</span></div>;
 }
