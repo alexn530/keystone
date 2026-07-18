@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ConfigurationItem,
   HealthData,
@@ -100,6 +100,10 @@ export function CmdbDashboard() {
   const [activeRunId, setActiveRunId] = useState(currentRunFromLocation);
   const [activeRunLabel, setActiveRunLabel] = useState(() => activeRunId ? `RUN-${activeRunId.slice(0, 8).toUpperCase()}` : "");
   const [runDraft, setRunDraft] = useState(activeRunId);
+  const [livePaused, setLivePaused] = useState(false);
+  const [liveRefreshing, setLiveRefreshing] = useState(false);
+  const [liveRefreshCount, setLiveRefreshCount] = useState(0);
+  const liveRefreshInFlight = useRef(false);
 
   const loadData = useCallback(async (runId: string) => {
     setApiState("connecting");
@@ -157,10 +161,36 @@ export function CmdbDashboard() {
     setLastSync(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
   }, []);
 
+  const refreshLiveTimeline = useCallback(async () => {
+    if (!activeRunId || liveRefreshInFlight.current) return;
+    liveRefreshInFlight.current = true;
+    setLiveRefreshing(true);
+    try {
+      const payload = await readEndpoint("timeline", activeRunId);
+      setTimeline(normalizeComprehendTimeline(payload));
+      setResourceState(current => ({ ...current, timeline: "live" }));
+      setApiState(current => current === "demo" ? "partial" : current);
+      setLiveRefreshCount(current => current + 1);
+      setLastSync(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+    } catch {
+      setTimeline([]);
+      setResourceState(current => ({ ...current, timeline: "error" }));
+      setApiState(current => current === "live" ? "partial" : current);
+    } finally {
+      liveRefreshInFlight.current = false;
+      setLiveRefreshing(false);
+    }
+  }, [activeRunId]);
+
   useEffect(() => {
     const timer = window.setTimeout(() => { void loadData(activeRunId); }, 0);
     return () => window.clearTimeout(timer);
   }, [activeRunId, loadData]);
+  useEffect(() => {
+    if (section !== "live" || livePaused || !activeRunId) return;
+    const timer = window.setInterval(() => { void refreshLiveTimeline(); }, 8000);
+    return () => window.clearInterval(timer);
+  }, [activeRunId, livePaused, refreshLiveTimeline, section]);
   useEffect(() => {
     fetch("/api/cmdb/instance", { cache: "no-store" })
       .then(response => (response.ok ? response.json() : null))
@@ -191,6 +221,8 @@ export function CmdbDashboard() {
     setActiveRunLabel(label);
     setRunDraft(runId);
     setActiveStep(0);
+    setLivePaused(false);
+    setLiveRefreshCount(0);
     setSection("comprehend");
     const url = new URL(window.location.href);
     if (runId) url.searchParams.set("run", runId);
@@ -258,7 +290,7 @@ export function CmdbDashboard() {
 
       {section === "import" && <ImportGatewayView onOpenRun={openRun} />}
       {section === "comprehend" && <ComprehendView health={health} timeline={timeline} relationships={relationships} cis={filteredCis} allCis={cis} selectedCi={selectedCi} setSelectedCi={setSelectedCi} search={search} setSearch={setSearch} filter={filter} setFilter={setFilter} playing={playing} activeStep={activeStep} startPlayback={startPlayback} setActiveStep={setActiveStep} apiState={apiState} resourceState={resourceState} activeRunId={activeRunId} runDraft={runDraft} setRunDraft={setRunDraft} loadRun={loadRunFromDraft} clearRun={() => { setRunDraft(""); openRun({ id: "", label: "" }); }} />}
-      {section === "live" && <LiveOpsView />}
+      {section === "live" && <LiveOpsView timeline={timeline} activeRunId={activeRunId} apiState={apiState} resourceStatus={resourceState.timeline} paused={livePaused} refreshing={liveRefreshing} refreshCount={liveRefreshCount} onPausedChange={setLivePaused} onRefresh={() => void refreshLiveTimeline()} />}
       {section === "hr" && <AgentHrView />}
       {section === "prioritize" && <PrioritizeView health={health} recalculating={apiState === "connecting"} onRecalculate={() => void loadData(activeRunId)} onFix={(fix) => { setQueuedFix(fix); setActionMessage(""); setSection("remediate"); }} />}
       {section === "remediate" && <RemediateView health={health} queuedFix={queuedFix} actionMessage={actionMessage} onSelect={(fix) => { setQueuedFix(fix); setActionMessage(""); }} onSubmit={submitRemediation} />}
