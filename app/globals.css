@@ -80,6 +80,7 @@ button { color: inherit; }
 .api-dot.live { background: var(--green); box-shadow: 0 0 9px rgba(89, 197, 139, .8); }
 .api-dot.partial { background: var(--amber); box-shadow: 0 0 9px rgba(232, 178, 61, .45); }
 .api-dot.demo { background: var(--coral); }
+.api-dot.error { background: var(--coral); box-shadow: 0 0 9px rgba(255, 101, 66, .5); }
 
 .main-content { min-height: 100vh; margin-left: var(--sidebar); }
 .topbar { height: 64px; display: flex; align-items: center; justify-content: space-between; padding: 0 34px; border-bottom: 1px solid var(--line); background: rgba(10, 12, 11, .78); backdrop-filter: blur(18px); position: sticky; top: 0; z-index: 20; }
@@ -180,8 +181,9 @@ button { color: inherit; }
 .event-meta strong { font-size: 11px; font-weight: 500; }
 .lime-text { color: var(--lime); }
 
-.visual-grid { display: grid; grid-template-columns: 1.12fr .88fr; gap: 12px; margin-bottom: 12px; }
-.sankey, .relationship-graph { min-height: 330px; padding: 14px 15px 12px; }
+.visual-grid { min-width: 0; display: grid; grid-template-columns: minmax(0, 1.12fr) minmax(0, .88fr); gap: 12px; margin-bottom: 12px; }
+.visual-grid > *, .sankey-panel, .graph-panel { min-width: 0; max-width: 100%; }
+.sankey, .relationship-graph { min-width: 0; max-width: 100%; min-height: 330px; padding: 14px 15px 12px; overflow-x: auto; overflow-y: hidden; }
 .sankey-head { display: grid; grid-template-columns: 1fr 1fr 1fr; color: var(--faint); font: 8.5px var(--mono); letter-spacing: .13em; }
 .sankey-head span:nth-child(2) { text-align: center; }
 .sankey-head span:last-child { text-align: right; }

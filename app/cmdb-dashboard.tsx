@@ -26,7 +26,7 @@ import { LiveOpsView } from "./live-view";
 import { AgentHrView } from "./hr-view";
 import { ImportGatewayView, type ImportedRun } from "./import-view";
 
-type ApiState = "connecting" | "live" | "partial" | "demo";
+type ApiState = "connecting" | "live" | "partial" | "demo" | "error";
 type ResourceName = "cis" | "timeline" | "relationships" | "health";
 type ResourceStatus = "connecting" | "live" | "error";
 type ResourceState = Record<ResourceName, ResourceStatus>;
@@ -41,7 +41,7 @@ const emptyHealth: HealthData = {
   score: 0,
   grade: "—",
   ciCount: 0,
-  duplicatesMerged: 0,
+  duplicateCandidates: 0,
   reviewCount: 0,
   relationshipCount: 0,
   completeness: 0,
@@ -78,8 +78,8 @@ function rememberRun(runId: string) {
 
 function OperationPill({ value }: { value: Operation }) {
   const labels: Record<Operation, string> = {
-    INSERT: "CLEARED · NEW",
-    UPDATE: "CLEARED · MATCH",
+    INSERT: "IRE-ELIGIBLE · NEW",
+    UPDATE: "IRE-ELIGIBLE · MATCH",
     NO_CHANGE: "NO CHANGE",
     INSERT_AS_INCOMPLETE: "INCOMPLETE",
     REVIEW: "HELD",
@@ -171,7 +171,7 @@ export function CmdbDashboard() {
     setActiveStep(0);
     setPlaying(false);
     setResourceState(nextResourceState);
-    setApiState(liveCount === 4 ? "live" : liveCount > 0 ? "partial" : "demo");
+    setApiState(liveCount === 4 ? "live" : liveCount > 0 ? "partial" : runId ? "error" : "demo");
     setLastSync(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
   }, []);
 
@@ -183,7 +183,7 @@ export function CmdbDashboard() {
       const payload = await readEndpoint("timeline", activeRunId);
       setTimeline(normalizeComprehendTimeline(payload));
       setResourceState(current => ({ ...current, timeline: "live" }));
-      setApiState(current => current === "demo" ? "partial" : current);
+      setApiState(current => current === "demo" || current === "error" ? "partial" : current);
       setLiveRefreshCount(current => current + 1);
       setLastSync(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
     } catch {
@@ -301,7 +301,7 @@ export function CmdbDashboard() {
       </nav>
       <div className="sidebar-rule" />
       <div className="governance-card"><span className="shield"><Icon name="shield" size={17} /></span><div><small>GOVERNANCE LOCK</small><strong>IRE is the only write path</strong><p>Every CMDB mutation is reconciled, attributed, and logged.</p></div></div>
-      <div className="sidebar-bottom"><div className={`api-dot ${apiState}`} /><div><strong>{apiState === "live" ? "Live API" : apiState === "partial" ? "Partial API" : apiState === "connecting" ? "Connecting" : "Demo snapshot"}</strong><small>Last sync {lastSync}</small></div><button onClick={() => void loadData(activeRunId)} aria-label="Refresh data"><Icon name="refresh" size={16} /></button></div>
+      <div className="sidebar-bottom"><div className={`api-dot ${apiState}`} /><div><strong>{apiState === "live" ? "Live API" : apiState === "partial" ? "Partial API" : apiState === "connecting" ? "Connecting" : apiState === "error" ? "API error" : "Demo snapshot"}</strong><small>Last sync {lastSync}</small></div><button onClick={() => void loadData(activeRunId)} aria-label="Refresh data"><Icon name="refresh" size={16} /></button></div>
     </aside>
 
     <main className="main-content">
@@ -340,16 +340,19 @@ function ComprehendView(props: {
   const activeEvent = timeline[Math.min(activeStep, Math.max(0, timeline.length - 1))];
   const activePhase = activeEvent?.step ?? 1;
   const totalEvents = timeline.length;
-  const runStatus = apiState === "connecting" ? "Loading ServiceNow run" : apiState === "live" ? "Live backend connected" : apiState === "partial" ? "Partial backend data" : "Demo snapshot";
+  const runStatus = apiState === "connecting" ? "Loading ServiceNow run" : apiState === "live" ? "Live backend connected" : apiState === "partial" ? "Partial backend data" : apiState === "error" ? "ServiceNow run unavailable" : "Demo snapshot";
+  const demoFallback = !activeRunId && apiState === "demo";
+  const proposedEdgeLabel = `${relationships.length.toLocaleString()} PROPOSED ${relationships.length === 1 ? "EDGE" : "EDGES"}`;
+  const proposedEdgeDelta = `${relationships.length.toLocaleString()} proposed ${relationships.length === 1 ? "edge" : "edges"}`;
   return <div className="page">
-    <section className="page-heading"><div><span className="eyebrow accent">COMPREHEND</span><h1>What happened to your data?</h1><p>Follow every staged record from quarantine through deterministic analysis and the confidence gate.</p></div><div className="run-state"><span className={`run-pulse ${apiState === "partial" || apiState === "demo" ? "paused" : ""}`} /><div><small>RUN STATUS</small><strong>{runStatus}</strong></div><span className="run-time">{activeRunId ? activeRunId.slice(0, 8) : "ALL RUNS"}</span></div></section>
+    <section className="page-heading"><div><span className="eyebrow accent">COMPREHEND</span><h1>What happened to your data?</h1><p>Follow every staged record from quarantine through deterministic analysis and the confidence gate.</p></div><div className="run-state"><span className={`run-pulse ${apiState === "partial" || apiState === "demo" || apiState === "error" ? "paused" : ""}`} /><div><small>RUN STATUS</small><strong>{runStatus}</strong></div><span className="run-time">{activeRunId ? activeRunId.slice(0, 8) : "ALL RUNS"}</span></div></section>
 
     <section className="run-context panel">
       <div className="run-context-copy"><span className="section-index">00</span><div><h2>Backend run context</h2><p>All four Comprehend resources use the same ServiceNow migration-run sys_id.</p></div></div>
       <label className="run-id-field"><span>RUN SYS_ID</span><input value={runDraft} onChange={event => setRunDraft(event.target.value)} onKeyDown={event => { if (event.key === "Enter") loadRun(); }} placeholder="Paste migration_run sys_id" /></label>
       <div className="run-context-actions"><button className="primary-button" onClick={loadRun}><Icon name="refresh" size={15} /> Load run</button>{activeRunId && <button className="ghost-button" onClick={clearRun}>All runs</button>}</div>
       <div className="resource-statuses">
-        {resourceNames.map(resource => <span key={resource} className={`resource-status status-${resourceState[resource]}`}><i />{resource}</span>)}
+        {resourceNames.map(resource => <span key={resource} title={`${resource}: ${resourceState[resource]}`} className={`resource-status status-${resourceState[resource]}`}><i />{resource}</span>)}
       </div>
     </section>
 
@@ -357,7 +360,7 @@ function ComprehendView(props: {
       <Kpi label="Staged CIs" value={(cisLive ? allCis.length : health.ciCount).toLocaleString()} delta={`${totalEvents} ledger events loaded`} tone="lime" icon="database" />
       <Kpi label="Gate cleared" value={cleared.toLocaleString()} delta="Eligible for future IRE simulation" tone="green" icon="shield" />
       <Kpi label="Held for review" value={(cisLive ? review : health.reviewCount).toLocaleString()} delta={`${reviewRate}% of loaded records`} tone="amber" icon="clock" />
-      <Kpi label="Staged relationships" value={(resourceState.relationships === "live" ? relationships.length : health.relationshipCount).toLocaleString()} delta={`${relationships.length} proposed edges`} tone="coral" icon="spark" />
+      <Kpi label="Staged relationships" value={(resourceState.relationships === "live" ? relationships.length : health.relationshipCount).toLocaleString()} delta={proposedEdgeDelta} tone="coral" icon="spark" />
     </section>
 
     <section className="panel playback-panel" id="event-ledger">
@@ -379,8 +382,8 @@ function ComprehendView(props: {
     </section>
 
     <section className="visual-grid">
-      <div className="panel sankey-panel"><div className="panel-heading compact"><div><span className="section-index">02</span><div><h2>Record flow</h2><p>Source to proposed class to Comprehend outcome</p></div></div><span className="panel-stat">{cisLive ? `${allCis.length.toLocaleString()} LIVE RECORDS` : "DEMO FLOW"}</span></div><SankeyVisual cis={allCis} live={cisLive} /></div>
-      <div className="panel graph-panel"><div className="panel-heading compact"><div><span className="section-index">03</span><div><h2>Relationship graph</h2><p>Proposed staged-CI relationships</p></div></div><span className="panel-stat"><i className="live-dot" /> {resourceState.relationships === "live" ? "LIVE" : "DEMO"}</span></div><RelationshipGraph cis={allCis} relationships={relationships} /></div>
+      <div className="panel sankey-panel"><div className="panel-heading compact"><div><span className="section-index">02</span><div><h2>Record flow</h2><p>Source to proposed class to Comprehend outcome</p></div></div><span className="panel-stat">{cisLive ? `${allCis.length.toLocaleString()} STAGED RECORDS` : demoFallback ? "DEMO FLOW" : "DATA UNAVAILABLE"}</span></div><SankeyVisual cis={allCis} live={cisLive} demo={demoFallback} /></div>
+      <div className="panel graph-panel"><div className="panel-heading compact"><div><span className="section-index">03</span><div><h2>Relationship graph</h2><p>Proposed staged-CI relationships</p></div></div><span className="panel-stat"><i className={resourceState.relationships === "live" ? "live-dot" : "live-dot demo"} /> {resourceState.relationships === "live" ? proposedEdgeLabel : demoFallback ? "DEMO" : "DATA UNAVAILABLE"}</span></div><RelationshipGraph cis={allCis} relationships={relationships} /></div>
     </section>
 
     <section className="panel table-panel">
@@ -389,7 +392,7 @@ function ComprehendView(props: {
         {cis.map(ci => <tr key={ci.id} onClick={() => setSelectedCi(ci)}><td><div className="ci-cell"><span className={`ci-icon status-${ci.status}`}><Icon name="database" size={15} /></span><div><strong>{ci.name}</strong><small>{ci.id} · {ci.ip}</small></div></div></td><td>{ci.className}</td><td><span className="source-name">{ci.source}</span></td><td><OperationPill value={ci.operation} /></td><td><Confidence value={ci.confidence} /></td><td><div className="health-cell"><span>{ci.health}</span><i><b style={{ width: `${ci.health}%` }} /></i></div></td><td><button className="row-arrow" aria-label={`Inspect ${ci.name}`} onClick={() => setSelectedCi(ci)}><Icon name="arrow" size={16} /></button></td></tr>)}
         {!cis.length && <tr><td colSpan={7} className="empty-state">No configuration items match this view.</td></tr>}
       </tbody></table></div>
-      <div className="table-footer"><span>{cis.length} shown · {cisLive ? "Live ServiceNow staged data" : "Demo snapshot"}</span><span>No CMDB write occurs before <strong>IRE</strong></span></div>
+      <div className="table-footer"><span>{cis.length} shown · {cisLive ? "Live ServiceNow staged data" : demoFallback ? "Demo snapshot" : "ServiceNow staged data unavailable"}</span><span>No CMDB write occurs before <strong>IRE</strong></span></div>
     </section>
   </div>;
 }
@@ -399,8 +402,8 @@ function Kpi({ label, value, delta, tone, icon }: { label: string; value: string
 }
 
 const sankeyOutcomeMeta = [
-  { label: "Cleared new", ops: ["INSERT"] as Operation[], node: "lime-node", bg: "lime-bg", color: "var(--lime)" },
-  { label: "Cleared match", ops: ["UPDATE", "NO_CHANGE"] as Operation[], node: "green-node", bg: "green-bg", color: "var(--green)" },
+  { label: "IRE-eligible new", ops: ["INSERT"] as Operation[], node: "lime-node", bg: "lime-bg", color: "var(--lime)" },
+  { label: "IRE-eligible match", ops: ["UPDATE", "NO_CHANGE"] as Operation[], node: "green-node", bg: "green-bg", color: "var(--green)" },
   { label: "Held", ops: ["REVIEW"] as Operation[], node: "amber-node", bg: "amber-bg", color: "var(--amber)" },
   { label: "Incomplete", ops: ["INSERT_AS_INCOMPLETE"] as Operation[], node: "amber-node", bg: "amber-bg", color: "var(--amber)" },
   { label: "Error", ops: ["ERROR"] as Operation[], node: "coral-node", bg: "coral-bg", color: "var(--coral)" },
@@ -472,9 +475,10 @@ function LiveSankey({ cis }: { cis: ConfigurationItem[] }) {
   </svg><div className="sankey-legend">{outcomeNodes.map(node => <span key={node.label}><i className={sankeyMetaFor(node.label).bg} /> {node.label} {node.count.toLocaleString()}</span>)}</div></div>;
 }
 
-function SankeyVisual({ cis, live }: { cis: ConfigurationItem[]; live: boolean }) {
+function SankeyVisual({ cis, live, demo }: { cis: ConfigurationItem[]; live: boolean; demo: boolean }) {
   if (live && cis.length) return <LiveSankey cis={cis} />;
   if (live) return <div className="sankey-empty"><Icon name="graph" size={24} /><strong>No CI records for this run</strong><p>The Sankey is synchronized; ServiceNow returned an empty CI collection.</p></div>;
+  if (!demo) return <div className="sankey-empty"><Icon name="graph" size={24} /><strong>CI data unavailable</strong><p>No demo records are substituted for a selected ServiceNow run.</p></div>;
   const paths = [
     ["M88 48 C180 48 202 44 292 55", 18, "var(--coral)"], ["M88 57 C180 62 210 92 292 98", 13, "var(--amber)"],
     ["M88 124 C175 122 207 77 292 70", 15, "#55b98a"], ["M88 134 C180 142 215 142 292 141", 10, "#799bbd"],
@@ -493,20 +497,27 @@ function SankeyVisual({ cis, live }: { cis: ConfigurationItem[]; live: boolean }
 
 function RelationshipGraph({ cis, relationships }: { cis: ConfigurationItem[]; relationships: Relationship[] }) {
   const graphCis = cis.slice(0, 7);
-  const positions = graphCis.reduce<Record<string, { x: number; y: number; ci: ConfigurationItem }>>((acc, ci, index) => {
+  const positions = new Map<string, { x: number; y: number; ci: ConfigurationItem }>();
+  graphCis.forEach((ci, index) => {
     const angle = (index / Math.max(graphCis.length, 1)) * Math.PI * 2 - Math.PI / 2;
     const radius = index === 0 ? 0 : 112;
-    acc[ci.name] = { x: 250 + Math.cos(angle) * radius, y: 145 + Math.sin(angle) * radius, ci };
-    return acc;
-  }, {});
-  if (graphCis[0]) positions[graphCis[0].name] = { x: 250, y: 145, ci: graphCis[0] };
-  const graphPositions = Object.values(positions);
-  const positionFor = (endpoint: string) => positions[endpoint] ?? graphPositions.find(position => position.ci.id === endpoint || position.ci.name === endpoint);
+    positions.set(ci.id, { x: 250 + Math.cos(angle) * radius, y: 145 + Math.sin(angle) * radius, ci });
+  });
+  if (graphCis[0]) positions.set(graphCis[0].id, { x: 250, y: 145, ci: graphCis[0] });
+  const graphPositions = [...positions.values()];
+  const nameCounts = graphCis.reduce<Map<string, number>>((counts, ci) => counts.set(ci.name, (counts.get(ci.name) || 0) + 1), new Map());
+  const positionFor = (endpoint: string, label?: string) => {
+    const byId = positions.get(endpoint);
+    if (byId) return byId;
+    const uniqueName = label || endpoint;
+    if (nameCounts.get(uniqueName) !== 1) return undefined;
+    return graphPositions.find(position => position.ci.name === uniqueName);
+  };
   return <div className="relationship-graph"><svg viewBox="0 0 500 300" role="img" aria-label="CI relationship graph">
     <defs><filter id="glow"><feGaussianBlur stdDeviation="3" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
-    {relationships.map(rel => { const from = positionFor(rel.source); const to = positionFor(rel.target); return from && to ? <line key={rel.id} x1={from.x} y1={from.y} x2={to.x} y2={to.y} stroke="#747970" strokeDasharray="3 5" opacity={rel.confidence} /> : null; })}
+    {relationships.map(rel => { const from = positionFor(rel.source, rel.sourceLabel); const to = positionFor(rel.target, rel.targetLabel); return from && to ? <line key={rel.id} x1={from.x} y1={from.y} x2={to.x} y2={to.y} stroke="#747970" strokeDasharray="3 5" opacity={rel.confidence} /> : null; })}
     {graphPositions.map(({ x, y, ci }, index) => <g key={ci.id} className={`graph-node ${index === 0 ? "central" : ""}`} transform={`translate(${x} ${y})`}><circle r={index === 0 ? 27 : 18} className="node-halo"/><circle r={index === 0 ? 16 : 10} className={ci.status === "live" ? "node-live" : "node-review"} filter={index === 0 ? "url(#glow)" : undefined}/><text y={index === 0 ? 39 : 31}>{ci.name}</text><text y={index === 0 ? 51 : 43} className="node-class">{ci.className}</text></g>)}
-  </svg><div className="graph-caption"><span><i className="node-key live" /> Gate cleared</span><span><i className="node-key review" /> Held for review</span><span>{relationships.length} proposed relationships</span></div></div>;
+  </svg><div className="graph-caption"><span><i className="node-key live" /> Gate cleared</span><span><i className="node-key review" /> Held for review</span><span>{relationships.length} proposed {relationships.length === 1 ? "relationship" : "relationships"}</span></div></div>;
 }
 
 function PrioritizeView({ health, recalculating, onRecalculate, onFix }: { health: HealthData; recalculating: boolean; onRecalculate: () => void; onFix: (fix: HealthFix) => void }) {

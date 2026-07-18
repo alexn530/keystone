@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import type { TimelineEvent } from "./cmdb-data";
 import { Icon } from "./icons";
 
-type LiveOpsApiState = "connecting" | "live" | "partial" | "demo";
+type LiveOpsApiState = "connecting" | "live" | "partial" | "demo" | "error";
 type TimelineResourceStatus = "connecting" | "live" | "error";
 
 export type LiveOpsViewProps = {

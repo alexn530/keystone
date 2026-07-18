@@ -33,6 +33,8 @@ export type Relationship = {
   id: string;
   source: string;
   target: string;
+  sourceLabel?: string;
+  targetLabel?: string;
   type: string;
   confidence: number;
 };
@@ -52,7 +54,7 @@ export type HealthData = {
   score: number;
   grade: string;
   ciCount: number;
-  duplicatesMerged: number;
+  duplicateCandidates: number;
   reviewCount: number;
   relationshipCount: number;
   completeness: number;
@@ -155,7 +157,7 @@ export const mockHealth: HealthData = {
   score: 78,
   grade: "B",
   ciCount: 842,
-  duplicatesMerged: 216,
+  duplicateCandidates: 216,
   reviewCount: 17,
   relationshipCount: 389,
   completeness: 82,
