@@ -80,7 +80,7 @@ export function AgentHrView() {
 
     <section className="panel roster-panel">
       <div className="panel-heading">
-        <div><span className="section-index">01</span><div><h2>The roster</h2><p>Click an agent to open Mara's latest review.</p></div></div>
+        <div><span className="section-index">01</span><div><h2>The roster</h2><p>Click an agent to open Mara&apos;s latest review.</p></div></div>
         <span className="panel-stat">CYCLE 07 · ALL REVIEWED</span>
       </div>
       <div className="roster-grid">
@@ -136,7 +136,7 @@ export function AgentHrView() {
           <WorkloadBars />
         </div>
         <div className="panel hrfeed-panel">
-          <div className="panel-heading compact"><div><span className="section-index">04</span><div><h2>Mara's day</h2><p>Recent HR actions</p></div></div></div>
+          <div className="panel-heading compact"><div><span className="section-index">04</span><div><h2>Mara&apos;s day</h2><p>Recent HR actions</p></div></div></div>
           <div className="hr-feed">
             {hrFeed.map(item => <div className="hr-feed-item" key={item.text}>
               <span className={`hr-feed-icon tone-${item.tone}`}><Icon name={item.icon} size={14} /></span>

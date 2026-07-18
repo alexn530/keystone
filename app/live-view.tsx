@@ -111,6 +111,7 @@ export function LiveOpsView() {
   const [buckets, setBuckets] = useState<number[]>(() => [0, 0, 1, 1, 2, 3, 5, 9, 16, 27]);
   const [outcomes, setOutcomes] = useState({ auto: 1189, held: 17, findings: 42 });
   const [agentActivity, setAgentActivity] = useState<Record<string, { task: string; at: number }>>({});
+  const [activityClock, setActivityClock] = useState(0);
   const [streaming, setStreaming] = useState(true);
   const [tickCount, setTickCount] = useState(0);
   const nextId = useRef(100);
@@ -155,9 +156,11 @@ export function LiveOpsView() {
         }
         return next;
       });
+      const activityTime = Date.now();
+      setActivityClock(activityTime);
       setAgentActivity(current => {
         const next = { ...current };
-        for (const event of created) next[event.agent] = { task: event.text, at: Date.now() };
+        for (const event of created) next[event.agent] = { task: event.text, at: activityTime };
         return next;
       });
     }, 1700);
@@ -216,7 +219,7 @@ export function LiveOpsView() {
         <div className="agent-board">
           {agents.map(agent => {
             const activity = agentActivity[agent.codename];
-            const working = activity && Date.now() - activity.at < 6000;
+            const working = activity && activityClock - activity.at < 6000;
             return <div className="board-row" key={agent.id}>
               <span className={`state-dot ${working ? "working" : "idle"}`} />
               <div className="board-copy">

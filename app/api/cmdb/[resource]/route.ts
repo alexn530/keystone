@@ -68,6 +68,7 @@ export async function POST(request: Request, context: { params: Promise<{ resour
           sourceName: incoming.sourceName,
           runName: incoming.runName,
           sourceUrl: incoming.sourceUrl,
+          sourceFileName: incoming.sourceFileName,
           format: incoming.format,
           payload: incoming.payload,
           target: "staging",

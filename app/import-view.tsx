@@ -2,9 +2,9 @@
 
 import { useMemo, useRef, useState } from "react";
 import { Icon } from "./icons";
+import { PreviewRow, buildStructuredStagingPayloadFromText, previewFromText } from "./lib/cmdb/import-staging";
 
 type ImportMode = "file" | "url" | "paste";
-type PreviewRow = Record<string, unknown>;
 type ImportStatus = "idle" | "staging" | "staged" | "demo" | "error";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -44,72 +44,6 @@ const sourcePresets = [
     note: "Hierarchical and relational exports uploaded as files.",
   },
 ] as const;
-
-function parseCsv(text: string): PreviewRow[] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cell = "";
-  let quoted = false;
-
-  for (let index = 0; index < text.length; index++) {
-    const char = text[index];
-    const next = text[index + 1];
-    if (char === '"' && quoted && next === '"') {
-      cell += '"';
-      index++;
-    } else if (char === '"') {
-      quoted = !quoted;
-    } else if (char === "," && !quoted) {
-      row.push(cell.trim());
-      cell = "";
-    } else if ((char === "\n" || char === "\r") && !quoted) {
-      if (char === "\r" && next === "\n") index++;
-      row.push(cell.trim());
-      if (row.some(value => value !== "")) rows.push(row);
-      row = [];
-      cell = "";
-    } else {
-      cell += char;
-    }
-  }
-  row.push(cell.trim());
-  if (row.some(value => value !== "")) rows.push(row);
-
-  const [headers = [], ...records] = rows;
-  return records.map(record =>
-    Object.fromEntries(headers.map((header, index) => [header || `column_${index + 1}`, record[index] ?? ""])),
-  );
-}
-
-function rowsFromJson(value: unknown): PreviewRow[] {
-  if (Array.isArray(value)) {
-    return value.map((item, index) =>
-      item && typeof item === "object" ? item as PreviewRow : { value: item, row: index + 1 },
-    );
-  }
-  if (!value || typeof value !== "object") return [{ value }];
-  const object = value as Record<string, unknown>;
-  for (const key of ["result", "data", "items", "records", "components", "value"]) {
-    if (Array.isArray(object[key])) return rowsFromJson(object[key]);
-  }
-  return [object];
-}
-
-function previewFromText(text: string, formatHint = "") {
-  const trimmed = text.trim();
-  if (!trimmed) return { rows: [] as PreviewRow[], error: "" };
-  try {
-    if (formatHint.includes("json") || trimmed.startsWith("{") || trimmed.startsWith("[")) {
-      return { rows: rowsFromJson(JSON.parse(trimmed)), error: "" };
-    }
-    return { rows: parseCsv(trimmed), error: "" };
-  } catch (error) {
-    return {
-      rows: [] as PreviewRow[],
-      error: error instanceof Error ? error.message : "The payload could not be parsed.",
-    };
-  }
-}
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
@@ -225,6 +159,7 @@ export function ImportGatewayView({ onOpenRun }: { onOpenRun: () => void }) {
       if (mode === "file" && file) {
         const extension = file.name.split(".").pop()?.toLowerCase() || "file";
         const text = await file.text();
+        const payload = buildStructuredStagingPayloadFromText(text, extension, sourceName.trim()) || text;
         response = await fetch("/api/cmdb/import", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -233,10 +168,12 @@ export function ImportGatewayView({ onOpenRun }: { onOpenRun: () => void }) {
             sourceName: sourceName.trim(),
             runName: runName.trim(),
             format: extension,
-            payload: text,
+            sourceFileName: file.name,
+            payload,
           }),
         });
       } else {
+        const payload = mode === "paste" ? buildStructuredStagingPayloadFromText(pasteValue, "auto", sourceName.trim()) || pasteValue : pasteValue;
         response = await fetch("/api/cmdb/import", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -246,7 +183,7 @@ export function ImportGatewayView({ onOpenRun }: { onOpenRun: () => void }) {
             runName: runName.trim(),
             sourceUrl: mode === "url" ? sourceUrl.trim() : undefined,
             format: mode === "paste" && pasteValue.trim().startsWith("<") ? "xml" : "auto",
-            payload: mode === "paste" ? pasteValue : undefined,
+            payload: mode === "paste" ? payload : undefined,
           }),
         });
       }
