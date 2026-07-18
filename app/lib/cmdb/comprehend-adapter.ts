@@ -68,7 +68,7 @@ export function normalizeComprehendCis(payload: unknown): ConfigurationItem[] {
           : "Cleared by deterministic gate";
 
     return {
-      id: text(row.number ?? row.id ?? row.sys_id, `DCI-${index + 1}`),
+      id: text(row.sys_id ?? row.id ?? row.number, `DCI-${index + 1}`),
       name,
       className,
       ip: text(row.ip ?? row.ip_address ?? values.ip ?? values.ip_address, "Not supplied"),
@@ -87,7 +87,7 @@ export function normalizeComprehendCis(payload: unknown): ConfigurationItem[] {
         {
           label: "Atlas classification",
           value: className,
-          detail: className === "Unclassified" ? "No valid proposed CMDB class is available." : "Proposed class validated during Comprehend.",
+          detail: classProvenanceDetail(row, className),
         },
         {
           label: "Sentry confidence gate",
@@ -151,10 +151,18 @@ export function normalizeComprehendTimeline(payload: unknown): TimelineEvent[] {
 export function normalizeComprehendRelationships(payload: unknown): Relationship[] {
   return arrayFromPayload(payload, ["relationships", "records", "items"]).map((item, index) => {
     const row = record(item);
+    const parent = row.parent_ci ?? row.parent ?? row.source ?? row.from;
+    const child = row.child_ci ?? row.child ?? row.target ?? row.to;
+    const source = text(referenceId(parent) ?? referenceLabel(parent), "Unknown parent");
+    const target = text(referenceId(child) ?? referenceLabel(child), "Unknown child");
+    const sourceLabel = referenceLabel(parent);
+    const targetLabel = referenceLabel(child);
     return {
       id: text(row.id ?? row.sys_id, `REL-${index + 1}`),
-      source: text(referenceLabel(row.parent_ci ?? row.parent ?? row.source ?? row.from), "Unknown parent"),
-      target: text(referenceLabel(row.child_ci ?? row.child ?? row.target ?? row.to), "Unknown child"),
+      source,
+      target,
+      ...(sourceLabel && sourceLabel !== source ? { sourceLabel } : {}),
+      ...(targetLabel && targetLabel !== target ? { targetLabel } : {}),
       type: text(
         referenceLabel(row.relationship_type ?? row.normalized_relationship_type ?? row.type),
         "Depends on::Used by",
@@ -182,8 +190,15 @@ export function normalizeComprehendHealth(payload: unknown): HealthData {
     score,
     grade: text(raw.grade, healthGrade(score)),
     ciCount: number(raw.ciCount ?? raw.ci_count ?? raw.total_cis ?? raw.total, 0),
-    duplicatesMerged: number(
-      raw.duplicate_count ?? raw.duplicates ?? raw.duplicatesMerged ?? raw.duplicates_merged,
+    // `duplicates_merged` is a legacy bridge name. During Comprehend it means
+    // detected duplicate candidates; no merge or CMDB mutation has occurred.
+    duplicateCandidates: number(
+      raw.duplicates_detected ??
+      raw.duplicate_candidates ??
+      raw.duplicate_count ??
+      raw.duplicates ??
+      raw.duplicatesMerged ??
+      raw.duplicates_merged,
       duplicateFixCount,
     ),
     reviewCount: number(raw.reviewCount ?? raw.review_count ?? raw.pending_review ?? raw.held, 0),
@@ -214,17 +229,29 @@ function deriveComprehendOutcome(row: Record<string, unknown>, confidence: numbe
 function eventPhase(eventType: string, actor: string, detail: string) {
   const lowerActor = actor.toLowerCase();
   const lowerDetail = detail.toLowerCase();
+  const action = ledgerAction(detail);
+  const analysisActions = new Set(["get_run_stats", "scan_classes", "scan_attributes", "scan_duplicates", "scan_orphans"]);
+
   if (eventType === "ingested" || eventType.includes("file_received") || lowerDetail.includes("seed data created")) return 1;
   if (eventType.includes("record_staged") || lowerDetail.includes("staged safely")) return 2;
-  if (lowerActor === "sentry" || eventType.includes("confidence") || lowerDetail.includes("confidence gate")) return 4;
+  if (analysisActions.has(action ?? "")) return 3;
+  if (action === "apply_confidence_gate") return 4;
+  if (lowerActor === "sentry" && /^observation:.*confidence gate applied/.test(lowerDetail)) return 4;
   if (eventType === "simulated" || eventType === "approved" || eventType.includes("review_")) return 5;
-  if (eventType === "committed" || eventType.includes("ire_execution") || eventType === "run_completed") return 6;
-  if (lowerActor === "ledger" || eventType === "error" || lowerDetail.includes("analysis completed") || lowerDetail.includes("planner completion")) return 7;
+  if (eventType === "committed" || eventType.includes("ire_execution")) return 6;
+  if (
+    action === "write_summary" ||
+    lowerActor === "ledger" ||
+    eventType === "error" ||
+    lowerDetail.includes("analysis completed") ||
+    lowerDetail.includes("planner completion")
+  ) return 7;
+  if (["router", "atlas", "scout", "weaver"].includes(lowerActor)) return 3;
   return 3;
 }
 
 function eventTitle(actor: string, eventType: string, detail: string) {
-  const action = detail.match(/\bAction:\s*([a-z0-9_]+)/i)?.[1];
+  const action = ledgerAction(detail);
   if (action) return `${actor} selected ${humanize(action)}`;
   if (/^observation:/i.test(detail)) return `${actor} recorded an observation`;
   if (/analysis session started/i.test(detail)) return "Analysis session started";
@@ -254,7 +281,7 @@ function timelineStatus(explicitStatus: unknown, eventType: string, detail: stri
 
 function inferActorFromLedgerDetail(detail: string) {
   const normalized = detail.toLowerCase();
-  const action = normalized.match(/\baction:\s*([a-z0-9_]+)/)?.[1];
+  const action = ledgerAction(normalized);
   const actionActors: Record<string, string> = {
     get_run_stats: "Router",
     scan_classes: "Atlas",
@@ -338,6 +365,51 @@ function referenceLabel(value: unknown): string | undefined {
   const ref = record(value);
   const label = ref.display_value ?? ref.name ?? ref.number ?? ref.source_identifier ?? ref.sys_id;
   return label === undefined || label === null ? undefined : String(label).trim() || undefined;
+}
+
+function referenceId(value: unknown): string | undefined {
+  if (typeof value === "string") return value.trim() || undefined;
+  const ref = record(value);
+  const id = ref.value ?? ref.sys_id ?? ref.id;
+  return id === undefined || id === null ? undefined : String(id).trim() || undefined;
+}
+
+function classProvenanceDetail(row: Record<string, unknown>, className: string) {
+  if (className === "Unclassified") return "No proposed CMDB class is available.";
+
+  const validation = record(row.validation_result);
+  const explicitValidity = row.class_valid ?? validation.class_valid;
+  const mismatch = row.class_mismatch ?? validation.class_mismatch;
+  const status = text(
+    row.class_validation_status ??
+    row.class_status ??
+    validation.class_validation_status ??
+    validation.class_status ??
+    validation.status,
+    "",
+  ).trim().toLowerCase();
+  const invalidStatuses = new Set(["invalid", "mismatch", "failed", "error", "rejected"]);
+  const validStatuses = new Set(["valid", "validated", "passed", "success"]);
+  const invalid =
+    explicitValidity === false ||
+    ["false", "no", "invalid"].includes(text(explicitValidity, "").trim().toLowerCase()) ||
+    mismatch === true ||
+    ["true", "yes", "mismatch"].includes(text(mismatch, "").trim().toLowerCase()) ||
+    invalidStatuses.has(status);
+  const valid =
+    explicitValidity === true ||
+    ["true", "yes", "valid"].includes(text(explicitValidity, "").trim().toLowerCase()) ||
+    validStatuses.has(status);
+
+  if (invalid) {
+    return "Invalid proposed CMDB class. Atlas created a class-mismatch finding and the record requires human review.";
+  }
+  if (valid) return "Proposed CMDB class validated during Comprehend.";
+  return "Proposed class recorded during Comprehend. Review the findings and gate outcome for validation status.";
+}
+
+function ledgerAction(detail: string) {
+  return detail.match(/\bAction:\s*([a-z0-9_]+)/i)?.[1]?.toLowerCase();
 }
 
 function hasReference(value: unknown) {

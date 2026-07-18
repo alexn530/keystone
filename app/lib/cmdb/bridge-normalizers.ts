@@ -92,7 +92,17 @@ export function normalizeHealth(payload: unknown): HealthData {
     score: num(raw.score ?? raw.health_score, mockHealth.score),
     grade: str(raw.grade, mockHealth.grade),
     ciCount: num(raw.ciCount ?? raw.ci_count ?? raw.total_cis, mockHealth.ciCount),
-    duplicatesMerged: num(raw.duplicatesMerged ?? raw.duplicates_merged ?? raw.duplicates_avoided, mockHealth.duplicatesMerged),
+    // Legacy bridge names describe detected candidates during the current read-only stage.
+    duplicateCandidates: num(
+      raw.duplicates_detected ??
+      raw.duplicate_candidates ??
+      raw.duplicate_count ??
+      raw.duplicates ??
+      raw.duplicatesMerged ??
+      raw.duplicates_merged ??
+      raw.duplicates_avoided,
+      mockHealth.duplicateCandidates,
+    ),
     reviewCount: num(raw.reviewCount ?? raw.review_count ?? raw.pending_review, mockHealth.reviewCount),
     relationshipCount: num(raw.relationshipCount ?? raw.relationship_count ?? raw.relationships, mockHealth.relationshipCount),
     completeness: num(raw.completeness, mockHealth.completeness),
