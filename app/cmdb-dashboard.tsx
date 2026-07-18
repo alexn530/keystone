@@ -35,6 +35,7 @@ type Section = "import" | "comprehend" | "live" | "hr" | "prioritize" | "remedia
 const steps = ["Intake", "Staging", "AI read", "Confidence gate", "IRE", "CMDB", "Event log"];
 const resourceNames: ResourceName[] = ["cis", "timeline", "relationships", "health"];
 const connectingResources: ResourceState = { cis: "connecting", timeline: "connecting", relationships: "connecting", health: "connecting" };
+const activeRunStorageKey = "cmdb-modernization:last-run-id";
 const emptyHealth: HealthData = {
   ...mockHealth,
   score: 0,
@@ -59,7 +60,20 @@ async function readEndpoint(resource: ResourceName, runId = "") {
 }
 
 function currentRunFromLocation() {
-  return typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("run")?.trim() || "";
+  if (typeof window === "undefined") return "";
+  const runFromUrl = new URLSearchParams(window.location.search).get("run")?.trim() || "";
+  if (runFromUrl) {
+    try { window.localStorage.setItem(activeRunStorageKey, runFromUrl); } catch {}
+    return runFromUrl;
+  }
+  try { return window.localStorage.getItem(activeRunStorageKey)?.trim() || ""; } catch { return ""; }
+}
+
+function rememberRun(runId: string) {
+  try {
+    if (runId) window.localStorage.setItem(activeRunStorageKey, runId);
+    else window.localStorage.removeItem(activeRunStorageKey);
+  } catch {}
 }
 
 function OperationPill({ value }: { value: Operation }) {
@@ -187,6 +201,13 @@ export function CmdbDashboard() {
     return () => window.clearTimeout(timer);
   }, [activeRunId, loadData]);
   useEffect(() => {
+    if (!activeRunId) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("run") === activeRunId) return;
+    url.searchParams.set("run", activeRunId);
+    window.history.replaceState({}, "", url);
+  }, [activeRunId]);
+  useEffect(() => {
     if (section !== "live" || livePaused || !activeRunId) return;
     const timer = window.setInterval(() => { void refreshLiveTimeline(); }, 8000);
     return () => window.clearInterval(timer);
@@ -224,6 +245,7 @@ export function CmdbDashboard() {
     setLivePaused(false);
     setLiveRefreshCount(0);
     setSection("comprehend");
+    rememberRun(runId);
     const url = new URL(window.location.href);
     if (runId) url.searchParams.set("run", runId);
     else url.searchParams.delete("run");
