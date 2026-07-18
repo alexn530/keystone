@@ -18,11 +18,15 @@ function importUrl() {
   return process.env.CMDB_IMPORT_URL || upstreamUrl("import");
 }
 
-export async function GET(_request: Request, context: { params: Promise<{ resource: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ resource: string }> }) {
   const { resource } = await context.params;
   if (!READ_RESOURCES.has(resource)) return Response.json({ error: "Unknown CMDB resource" }, { status: 404 });
-  const url = upstreamUrl(resource);
+ /* const url = upstreamUrl(resource);
+  if (!url) return Response.json({ error: "CMDB_API_BASE_URL is not configured" }, { status: 503 }); */
+let url = upstreamUrl(resource);
   if (!url) return Response.json({ error: "CMDB_API_BASE_URL is not configured" }, { status: 503 });
+  const search = new URL(request.url).search;
+  if (search) url += search;
 
   const authorization = authorizationHeader();
   try {
