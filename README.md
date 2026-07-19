@@ -45,6 +45,8 @@ Use either a bearer token or basic authentication. These credentials are only re
 
 The optional `CMDB_IRE_*` variables point to ServiceNow scripted REST actions for single-record IRE simulation, approval, execution, and verification. If per-action URLs are omitted, Keystone uses `CMDB_IRE_BASE_URL/ire/{action}` or falls back to `CMDB_API_BASE_URL/ire/{action}`. Execution requests are identifier-only; ServiceNow remains responsible for rebuilding the authoritative payload, validating approval/fingerprint freshness, and calling IRE.
 
+Mara's LLM runtime belongs in ServiceNow Script Includes. The browser does not receive provider credentials or call a model. It reads Mara's run-scoped Event Ledger and finding records through the existing CMDB bridge.
+
 ## Deploy to Vercel
 
 1. Push the `frontend` directory to a Git repository.
