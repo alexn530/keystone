@@ -1,4 +1,4 @@
-const READ_RESOURCES = new Set(["cis", "timeline", "relationships", "health"]);
+const READ_RESOURCES = new Set(["cis", "timeline", "relationships", "health", "findings", "reviews", "run"]);
 
 function authorizationHeader() {
   if (process.env.CMDB_API_TOKEN) return `Bearer ${process.env.CMDB_API_TOKEN}`;

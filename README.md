@@ -38,6 +38,8 @@ Use either a bearer token or basic authentication. These credentials are only re
 
 `CMDB_IMPORT_URL` must point to a ServiceNow scripted REST endpoint that lands uploads and URL-connector requests in a custom staging/import table. The gateway always adds `target=staging`, `mode=quarantine`, and `directCmdbWrite=false`.
 
+Mara's LLM runtime belongs in ServiceNow Script Includes. The browser does not receive provider credentials or call a model. It reads Mara's run-scoped Event Ledger and finding records through the existing CMDB bridge.
+
 ## Deploy to Vercel
 
 1. Push the `frontend` directory to a Git repository.

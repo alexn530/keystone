@@ -208,7 +208,7 @@ export function CmdbDashboard() {
     window.history.replaceState({}, "", url);
   }, [activeRunId]);
   useEffect(() => {
-    if (section !== "live" || livePaused || !activeRunId) return;
+    if ((section !== "live" && section !== "hr") || livePaused || !activeRunId) return;
     const timer = window.setInterval(() => { void refreshLiveTimeline(); }, 8000);
     return () => window.clearInterval(timer);
   }, [activeRunId, livePaused, refreshLiveTimeline, section]);
@@ -286,7 +286,7 @@ export function CmdbDashboard() {
     { id: "import", label: "Import", detail: "Bring data in", icon: "upload" },
     { id: "comprehend", label: "Comprehend", detail: "See the run", icon: "grid" },
     { id: "live", label: "Live Ops", detail: "Watch agents work", icon: "bolt" },
-    { id: "hr", label: "Agent HR", detail: "Manage the workforce", icon: "users" },
+    { id: "hr", label: "Agent HR", detail: "LLM supervisor & audit", icon: "users" },
     { id: "prioritize", label: "Prioritize", detail: "Rank what matters", icon: "pulse" },
     { id: "remediate", label: "Remediate", detail: "Close the loop", icon: "tool" },
   ];
@@ -313,7 +313,7 @@ export function CmdbDashboard() {
       {section === "import" && <ImportGatewayView onOpenRun={openRun} />}
       {section === "comprehend" && <ComprehendView health={health} timeline={timeline} relationships={relationships} cis={filteredCis} allCis={cis} selectedCi={selectedCi} setSelectedCi={setSelectedCi} search={search} setSearch={setSearch} filter={filter} setFilter={setFilter} playing={playing} activeStep={activeStep} startPlayback={startPlayback} setActiveStep={setActiveStep} apiState={apiState} resourceState={resourceState} activeRunId={activeRunId} runDraft={runDraft} setRunDraft={setRunDraft} loadRun={loadRunFromDraft} clearRun={() => { setRunDraft(""); openRun({ id: "", label: "" }); }} />}
       {section === "live" && <LiveOpsView timeline={timeline} activeRunId={activeRunId} apiState={apiState} resourceStatus={resourceState.timeline} paused={livePaused} refreshing={liveRefreshing} refreshCount={liveRefreshCount} onPausedChange={setLivePaused} onRefresh={() => void refreshLiveTimeline()} />}
-      {section === "hr" && <AgentHrView />}
+      {section === "hr" && <AgentHrView timeline={timeline} timelineLive={resourceState.timeline === "live"} cis={resourceState.cis === "live" ? cis : null} activeRunId={activeRunId} />}
       {section === "prioritize" && <PrioritizeView health={health} recalculating={apiState === "connecting"} onRecalculate={() => void loadData(activeRunId)} onFix={(fix) => { setQueuedFix(fix); setActionMessage(""); setSection("remediate"); }} />}
       {section === "remediate" && <RemediateView health={health} queuedFix={queuedFix} actionMessage={actionMessage} onSelect={(fix) => { setQueuedFix(fix); setActionMessage(""); }} onSubmit={submitRemediation} />}
     </main>
