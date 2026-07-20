@@ -45,8 +45,9 @@ function fmtDuration(ms?: number) {
 }
 
 export default function AiUsagePage() {
-  const [runDraft, setRunDraft] = useState(runFromLocation);
-  const [runId, setRunId] = useState(runFromLocation);
+  // Seed empty so SSR and first client render agree; the URL run is read after mount.
+  const [runDraft, setRunDraft] = useState("");
+  const [runId, setRunId] = useState("");
   const [state, setState] = useState<LoadState>("idle");
   const [message, setMessage] = useState("");
   const [data, setData] = useState<AiUsageResponse | null>(null);
@@ -77,14 +78,15 @@ export default function AiUsagePage() {
         setMessage(readableError(raw) || `Request failed (${response.status}).`);
         return;
       }
-      if (usage.unavailable && usage.calls.length === 0) {
-        setData(null);
-        setState("unavailable");
-        setMessage(readableError(usage.unavailable) || "Token metrics are not available for this run yet.");
-        return;
-      }
       setData(usage);
-      setState(usage.calls.length ? "ready" : "empty");
+      if (usage.calls.length) {
+        setState("ready");
+      } else {
+        // 200 with no calls is a healthy "no usage captured yet" run, not a fault.
+        // Prefer the backend's own reason (e.g. unavailableReason) over a generic string.
+        setState("empty");
+        setMessage(readableError(usage.unavailable) || "");
+      }
     } catch (error) {
       setData(null);
       setState("error");
@@ -92,15 +94,22 @@ export default function AiUsagePage() {
     }
   }, []);
 
-  // Kick off the initial load from the URL run param (state is seeded lazily above).
-  // Deferred to a timeout so the load's setState does not run inside the effect body.
+  // Read the run from the URL after mount (not during render) so hydration matches,
+  // then kick off the initial load. Deferred to a timeout so the setState calls do
+  // not run synchronously inside the effect body.
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      if (runId) void load(runId);
-      else setMessage("Enter a migration run sys_id to load its AI usage.");
+      const fromUrl = runFromLocation();
+      if (fromUrl) {
+        setRunDraft(fromUrl);
+        setRunId(fromUrl);
+        void load(fromUrl);
+      } else {
+        setMessage("Enter a migration run sys_id to load its AI usage.");
+      }
     }, 0);
     return () => window.clearTimeout(timer);
-    // Run once on mount; runId is the seeded URL value.
+    // Run once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -180,7 +189,7 @@ export default function AiUsagePage() {
           )}
 
           {state === "empty" && (
-            <div className="panel empty-state">No model calls were recorded for run {runId.slice(0, 8)}.</div>
+            <div className="panel empty-state">{message || `No model calls were recorded for run ${runId.slice(0, 8)}.`}</div>
           )}
 
           {state === "ready" && data && (

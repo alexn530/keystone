@@ -91,7 +91,10 @@ export function normalizeCall(item: unknown, index: number): AiUsageCall {
 
 export function normalizeUsage(payload: unknown, runId: string): AiUsageResponse {
   const outer = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
-  const unavailable = optionalStr(outer.unavailable ?? outer.error ?? outer.message);
+  // `unavailableReason` is the field the live /usage bridge sends for empty runs.
+  const unavailable = optionalStr(
+    outer.unavailable ?? outer.unavailableReason ?? outer.unavailable_reason ?? outer.error ?? outer.message,
+  );
   const calls = arrayFromPayload(payload).map(normalizeCall);
 
   const rawTotals = (outer.totals && typeof outer.totals === "object" ? outer.totals : {}) as Record<string, unknown>;
