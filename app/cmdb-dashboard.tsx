@@ -43,6 +43,7 @@ import {
 
 import { normalizeMaraRun, type MaraRunRecord } from "./lib/cmdb/mara-audit";
 import { isDraftRunState, isTerminalRunState, TERMINAL_RUN_STATES } from "./lib/cmdb/run-lifecycle";
+import { rememberRun, resolveActiveRun } from "./lib/cmdb/run-context";
 import { Icon, type IconName } from "./icons";
 import { LiveOpsView } from "./live-view";
 import { AgentHrView } from "./hr-view";
@@ -64,7 +65,6 @@ type IreWorkbenchRecord = {
 const steps = ["Intake", "Staging", "AI read", "Confidence gate", "IRE", "CMDB", "Event log"];
 const resourceNames: ResourceName[] = ["cis", "timeline", "relationships", "health", "findings", "reviews"];
 const connectingResources: ResourceState = { cis: "connecting", timeline: "connecting", relationships: "connecting", health: "connecting", findings: "connecting", reviews: "connecting" };
-const activeRunStorageKey = "cmdb-modernization:last-run-id";
 const emptyHealth: HealthData = {
   ...mockHealth,
   score: 0,
@@ -100,21 +100,12 @@ async function readRunStatus(runId: string): Promise<MaraRunRecord | null> {
   return normalizeMaraRun(await response.json());
 }
 
+// Resolve on mount from the shared run-context module so AI Usage and the
+// dashboard share exactly the same priority: URL first, then localStorage.
 function currentRunFromLocation() {
-  if (typeof window === "undefined") return "";
-  const runFromUrl = new URLSearchParams(window.location.search).get("run")?.trim() || "";
-  if (runFromUrl) {
-    try { window.localStorage.setItem(activeRunStorageKey, runFromUrl); } catch {}
-    return runFromUrl;
-  }
-  try { return window.localStorage.getItem(activeRunStorageKey)?.trim() || ""; } catch { return ""; }
-}
-
-function rememberRun(runId: string) {
-  try {
-    if (runId) window.localStorage.setItem(activeRunStorageKey, runId);
-    else window.localStorage.removeItem(activeRunStorageKey);
-  } catch {}
+  const resolved = resolveActiveRun();
+  if (resolved) rememberRun(resolved);
+  return resolved;
 }
 
 function OperationPill({ value }: { value: Operation }) {
@@ -161,6 +152,7 @@ export function CmdbDashboard() {
   const [activeRunLabel, setActiveRunLabel] = useState(() => activeRunId ? `RUN-${activeRunId.slice(0, 8).toUpperCase()}` : "");
   const [runDraft, setRunDraft] = useState(activeRunId);
   const [livePaused, setLivePaused] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [liveRefreshing, setLiveRefreshing] = useState(false);
   const [liveRefreshCount, setLiveRefreshCount] = useState(0);
   const liveRefreshInFlight = useRef(false);
@@ -467,8 +459,8 @@ export function CmdbDashboard() {
     { id: "remediate", label: "Remediate", detail: "Close the loop", icon: "tool" },
   ];
 
-  return <div className="app-shell">
-    <aside className="sidebar">
+  return <div className={`app-shell${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
+    <aside className="sidebar" aria-hidden={sidebarCollapsed}>
       <div className="brand"><span className="brand-mark"><span /></span><div><strong>CMDB</strong><small>MODERNIZATION CONTROL</small></div></div>
       <nav className="main-nav" aria-label="Main navigation">
         {nav.map(item => <button key={item.id} aria-label={`${item.label}: ${item.detail}`} title={item.label} className={section === item.id ? "active" : ""} onClick={() => setSection(item.id)}>
@@ -482,7 +474,18 @@ export function CmdbDashboard() {
 
     <main className="main-content">
       <header className="topbar">
-        <div><span className="eyebrow">{section === "import" ? "DATA INTAKE" : "MODERNIZATION RUN"}</span><strong>{section === "import" ? "NEW MIGRATION RUN" : activeRunLabel || "ALL MIGRATION RUNS"}</strong></div>
+        <div className="topbar-lead">
+          <button
+            type="button"
+            className="sidebar-toggle"
+            aria-label={sidebarCollapsed ? "Open navigation" : "Close navigation"}
+            aria-expanded={!sidebarCollapsed}
+            onClick={() => setSidebarCollapsed(current => !current)}
+          >
+            <Icon name="menu" size={18} />
+          </button>
+          <div><span className="eyebrow">{section === "import" ? "DATA INTAKE" : "MODERNIZATION RUN"}</span><strong>{section === "import" ? "NEW MIGRATION RUN" : activeRunLabel || "ALL MIGRATION RUNS"}</strong></div>
+        </div>
         <div className="top-actions"><span className="instance"><span className={instanceHost ? "live-dot" : "live-dot demo"} /> {instanceHost ?? "demo mode"}</span><a className="ghost-button" href={activeRunId ? `/ai-usage?run=${encodeURIComponent(activeRunId)}` : "/ai-usage"}><Icon name="spark" size={15} /> AI Usage</a><button className="ghost-button" onClick={openEventLedger}><Icon name="clock" size={15} /> Event ledger</button><div className="avatar">NS</div></div>
       </header>
 
