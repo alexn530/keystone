@@ -48,6 +48,7 @@ import { Icon, type IconName } from "./icons";
 import { LiveOpsView } from "./live-view";
 import { AgentHrView } from "./hr-view";
 import { ImportGatewayView, type ImportedRun } from "./import-view";
+import { MaraCompanion } from "./mara-companion";
 
 type ApiState = "connecting" | "live" | "partial" | "demo" | "error";
 type AnalysisState = "idle" | "starting" | "started" | "error";
@@ -498,6 +499,24 @@ export function CmdbDashboard() {
     </main>
 
     {selectedCi && <ProvenancePanel ci={selectedCi} onClose={() => setSelectedCi(null)} onOpenLedger={openEventLedger} />}
+
+    <MaraCompanion
+      section={section}
+      activeRunId={activeRunId}
+      activeRunLabel={activeRunLabel}
+      runState={runRecord?.state ?? ""}
+      analysisState={analysisState}
+      apiState={apiState}
+      timeline={timeline}
+      cis={cis}
+      health={health}
+      findings={findings}
+      reviews={reviews}
+      queuedFix={queuedFix}
+      onNavigate={setSection}
+      onOpenLedger={openEventLedger}
+      onShowReviewQueue={() => { setFilter("review"); setSection("comprehend"); }}
+    />
   </div>;
 }
 
