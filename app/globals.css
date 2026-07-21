@@ -867,7 +867,12 @@ tbody tr:hover .row-arrow { color: var(--lime); transform: translateX(2px); }
 /* Mara — CMDB Modernization companion mascot */
 .mara-companion { position: fixed; right: 22px; bottom: 22px; z-index: 40; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; pointer-events: none; font-family: inherit; }
 .mara-companion > * { pointer-events: auto; }
-.mara-toggle { width: 108px; height: 108px; padding: 0; border: 0; background: transparent; cursor: pointer; border-radius: 50%; display: grid; place-items: center; filter: drop-shadow(0 10px 26px rgba(0, 0, 0, .55)); transition: transform .2s ease; }
+.mara-toggle { width: 108px; height: 108px; padding: 0; border: 0; background: transparent; cursor: pointer; border-radius: 50%; display: grid; place-items: center; filter: drop-shadow(0 10px 26px rgba(0, 0, 0, .55)) drop-shadow(0 0 18px rgba(57, 255, 156, .55)); transition: transform .2s ease, filter .3s ease; }
+.mara-toggle:hover { filter: drop-shadow(0 12px 30px rgba(0, 0, 0, .6)) drop-shadow(0 0 26px rgba(57, 255, 156, .75)); }
+.mara-companion.mara-sleeping .mara-toggle { filter: drop-shadow(0 10px 26px rgba(0, 0, 0, .55)) drop-shadow(0 0 10px rgba(57, 255, 156, .25)); }
+.mara-companion.mara-warning .mara-toggle,
+.mara-companion.mara-awaiting-approval .mara-toggle { filter: drop-shadow(0 10px 26px rgba(0, 0, 0, .55)) drop-shadow(0 0 22px rgba(232, 178, 61, .6)); }
+.mara-companion.mara-error .mara-toggle { filter: drop-shadow(0 10px 26px rgba(0, 0, 0, .55)) drop-shadow(0 0 22px rgba(255, 101, 66, .6)); }
 .mara-toggle:hover { transform: translateY(-2px); }
 .mara-toggle:focus-visible { outline: 2px solid var(--lime); outline-offset: 4px; }
 .mara-svg { width: 100%; height: 100%; display: block; overflow: visible; animation: mara-float 5.5s ease-in-out infinite; }
@@ -938,7 +943,7 @@ tbody tr:hover .row-arrow { color: var(--lime); transform: translateX(2px); }
 @keyframes mara-spin { to { transform: rotate(360deg); } }
 @keyframes mara-blink { 0%, 88%, 100% { transform: scaleY(1); } 92%, 96% { transform: scaleY(.08); } }
 @keyframes mara-wink { 0%, 40%, 100% { transform: scaleY(1); } 45%, 50% { transform: scaleY(.08); } }
-@keyframes mara-core-glow { 0%, 100% { filter: drop-shadow(0 0 3px rgba(255, 149, 199, .5)); } 50% { filter: drop-shadow(0 0 9px rgba(255, 90, 168, .75)); } }
+@keyframes mara-core-glow { 0%, 100% { filter: drop-shadow(0 0 4px rgba(57, 255, 156, .35)) drop-shadow(0 0 2px rgba(255, 149, 199, .35)); } 50% { filter: drop-shadow(0 0 10px rgba(57, 255, 156, .6)) drop-shadow(0 0 6px rgba(255, 90, 168, .5)); } }
 @keyframes mara-bloom-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
 @keyframes mara-ring-pulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
 @keyframes mara-bubble-in { from { opacity: 0; transform: translateY(6px); } }
@@ -948,9 +953,21 @@ tbody tr:hover .row-arrow { color: var(--lime); transform: translateX(2px); }
 
 .mara-arms, .mara-notebook { transform-box: fill-box; transform-origin: 50% 20%; animation: mara-arm-sway 4.4s ease-in-out infinite; }
 .mara-cheeks ellipse { animation: mara-cheek-pulse 3.6s ease-in-out infinite; }
-.mara-halo-ring { transform-box: fill-box; transform-origin: 50% 50%; animation: mara-halo-pulse 5.2s ease-in-out infinite; }
+.mara-halo-green { transform-box: fill-box; transform-origin: 50% 50%; animation: mara-halo-pulse 4.4s ease-in-out infinite; }
+.mara-halo-pink { transform-box: fill-box; transform-origin: 50% 50%; animation: mara-halo-pulse 6.2s ease-in-out infinite; animation-delay: .8s; }
 .mara-core { transform-box: fill-box; transform-origin: 50% 50%; animation: mara-breathe 4.8s ease-in-out infinite, mara-core-glow 5.6s ease-in-out infinite; }
+.mara-core-rim { opacity: 0.7; animation: mara-cheek-pulse 5s ease-in-out infinite; }
 .mara-companion.mara-blooming .mara-eyes circle { animation: mara-wink 5.6s ease-in-out infinite; }
+.mara-sparkle { transform-box: fill-box; transform-origin: 50% 50%; }
+.mara-sparkle-1 { animation: mara-sparkle-a 3.4s ease-in-out infinite; }
+.mara-sparkle-2 { animation: mara-sparkle-b 4.1s ease-in-out infinite; animation-delay: .4s; }
+.mara-sparkle-3 { animation: mara-sparkle-a 3.9s ease-in-out infinite; animation-delay: .8s; }
+.mara-sparkle-4 { animation: mara-sparkle-b 3.2s ease-in-out infinite; animation-delay: 1.2s; }
+.mara-sparkle-5 { animation: mara-sparkle-spin 5.6s linear infinite; opacity: 0.7; }
+.mara-pencil { transform-box: fill-box; transform-origin: 50% 50%; animation: mara-arm-sway 5.4s ease-in-out infinite reverse; }
+@keyframes mara-sparkle-a { 0%, 100% { opacity: 0.2; transform: translateY(0) scale(0.7); } 50% { opacity: 0.95; transform: translateY(-2px) scale(1.1); } }
+@keyframes mara-sparkle-b { 0%, 100% { opacity: 0.3; transform: translateY(0) scale(0.6); } 50% { opacity: 0.85; transform: translateY(2px) scale(1.15); } }
+@keyframes mara-sparkle-spin { 0% { transform: rotate(0deg); opacity: 0.5; } 50% { opacity: 0.95; } 100% { transform: rotate(360deg); opacity: 0.5; } }
 
 .mara-companion.mara-muted .mara-svg { animation-play-state: paused; opacity: .82; }
 .mara-companion.mara-muted .mara-halo-ring,
@@ -960,6 +977,8 @@ tbody tr:hover .row-arrow { color: var(--lime); transform: translateX(2px); }
 .mara-companion.mara-muted .mara-orbit,
 .mara-companion.mara-muted .mara-arms,
 .mara-companion.mara-muted .mara-notebook,
+.mara-companion.mara-muted .mara-pencil,
+.mara-companion.mara-muted .mara-sparkle,
 .mara-companion.mara-muted .mara-cheeks ellipse,
 .mara-companion.mara-muted .mara-eyes circle,
 .mara-companion.mara-muted .mara-status-ring { animation: none; }
