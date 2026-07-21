@@ -23,8 +23,12 @@ DotwalkersAgentEventDetailService.prototype = {
 			'simulation_correlation_id', 'execution_correlation_id',
 			'simulation_fingerprint', 'mapping_version', 'target_ci_sys_id',
 			'idempotency_key', 'work_group_signature', 'operation',
-			'simulation_matched_ci'
+			'simulation_matched_ci', 'review_decision_id', 'approval_event_id',
+			'claim_event_id', 'failure_event_id', 'error_code', 'decided_by'
 		]);
+		var decision = this._choice(data.decision, ['approved', 'rejected'], '');
+		if (decision) detail.decision = decision;
+		if (data.policy_approved === false) detail.policy_approved = false;
 		this._optionalNumber(detail, data, [
 			'retry_count', 'max_retries', 'baseline_score', 'verified_score',
 			'projected_score', 'health_impact'

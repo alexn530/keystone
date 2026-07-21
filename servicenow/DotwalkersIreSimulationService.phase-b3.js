@@ -15,6 +15,9 @@ DotwalkersIreSimulationService.prototype = {
             finding:
                 'x_kest_dotwalkers_finding',
 
+            review:
+                'x_kest_dotwalkers_review_decision',
+
             ledger:
                 'x_kest_dotwalkers_event_ledger'
         };
@@ -26,6 +29,20 @@ DotwalkersIreSimulationService.prototype = {
 
         this.REQUIRED_ROLE =
             'x_kest_dotwalkers.migration_run_user';
+
+        this.MARA_EVENT =
+            'x_kest_dotwalkers.mara.requested';
+
+        this.APPROVAL_FIELDS = {
+            migration_run_id: true,
+            staged_ci_id: true,
+            finding_id: true,
+            review_decision_id: true,
+            correlation_id: true,
+            idempotency_key: true,
+            simulation_correlation_id: true,
+            simulation_fingerprint: true
+        };
 
         this.ERROR_CODE_MAP = {
             INVALID_REQUEST: { http_status: 400, message: 'Invalid simulation request' },
@@ -98,6 +115,14 @@ DotwalkersIreSimulationService.prototype = {
 
     _identifyCi: function(ireInput) {
         return sn_cmdb.IdentificationEngine.identifyCI(ireInput);
+    },
+
+    _sha256: function(value) {
+        return String(new GlideDigest().getSHA256Hex(String(value || ''))).toLowerCase();
+    },
+
+    _queueMaraEvent: function(runRecord, runId, approvalEventId) {
+        gs.eventQueue(this.MARA_EVENT, runRecord, runId, approvalEventId);
     },
 
     // ──────────────────────────────────────────────────────────────────
@@ -698,6 +723,7 @@ DotwalkersIreSimulationService.prototype = {
                 correlation_id: request.correlation_id,
                 simulation_correlation_id: request.correlation_id,
                 simulation_fingerprint: simulationFingerprintValue,
+                finding_id: findingId,
                 operation: operation,
                 simulation_matched_ci: matchedCi,
                 idempotency_key: request.idempotency_key
@@ -797,6 +823,697 @@ DotwalkersIreSimulationService.prototype = {
                 'IRE simulation failed'
             );
         }
+    },
+
+    /**
+     * Phase C approval entry point. The request is identifiers and correlation
+     * metadata only. All executable and decision material is reread or assigned
+     * on the server.
+     */
+    approve: function(request) {
+        var normalized;
+
+        try {
+            normalized = this._validateApprovalRequest(request);
+            this._validateCaller();
+        } catch (validationError) {
+            return this._approvalError(
+                validationError && validationError.error_code === 'UNAUTHORIZED' ? 401 :
+                    validationError && validationError.error_code === 'FORBIDDEN' ? 403 : 400,
+                validationError && validationError.error_code ? validationError.error_code : 'INVALID_REQUEST',
+                validationError && validationError.error_code === 'UNAUTHORIZED' ? 'Authentication required' :
+                    validationError && validationError.error_code === 'FORBIDDEN' ? 'Insufficient permissions' :
+                        'Invalid approval request',
+                normalized
+            );
+        }
+
+        var binding;
+        try {
+            binding = this._resolveApprovalBinding(normalized, true);
+        } catch (bindingError) {
+            return this._approvalError(
+                bindingError.http_status || 409,
+                bindingError.error_code || 'APPROVAL_BINDING_REJECTED',
+                bindingError.public_message || 'Approval binding was rejected',
+                normalized
+            );
+        }
+
+        var approvalClaim;
+        try {
+            approvalClaim = this._insertBindingEvent(
+                binding,
+                'approved',
+                'approval_recorded',
+                binding.approval_event_id,
+                {
+                    decision: 'approved',
+                    decided_by: binding.decided_by,
+                    policy_approved: false
+                }
+            );
+        } catch (claimError) {
+            return this._approvalError(409, 'APPROVAL_CONFLICT', 'Approval binding conflicts with existing evidence', normalized);
+        }
+
+        if (approvalClaim.won) {
+            try {
+                this._approveReview(binding.review_record, binding.decided_by);
+            } catch (reviewError) {
+                return this._approvalError(503, 'APPROVAL_PERSIST_FAILED', 'Approval could not be persisted', normalized, true);
+            }
+        } else if (this._text(binding.review_record.getValue('decision')) !== 'approved') {
+            return {
+                success: true,
+                http_status: 202,
+                state: 'approval_recording',
+                approval_event_id: binding.approval_event_id,
+                idempotent_replay: true,
+                handoff_queued: false
+            };
+        }
+
+        return this._attemptApprovalHandoff(binding, approvalClaim.won);
+    },
+
+    /**
+     * Script Action entry point. The complete binding is reread and validated
+     * before the deterministic one-time resume claim is attempted.
+     */
+    validateAndClaimApprovalResume: function(runId, approvalEventId) {
+        runId = this._text(runId).toLowerCase();
+        approvalEventId = this._text(approvalEventId).toLowerCase();
+
+        if (!this._isSysId(runId) || !this._isSysId(approvalEventId)) {
+            return this._resumeResult(false, 'malformed_token', null, false);
+        }
+
+        var binding;
+        try {
+            binding = this._bindingFromApprovalEvent(runId, approvalEventId);
+        } catch (tokenError) {
+            return this._resumeResult(false, tokenError.error_code || 'stale_token', null, false);
+        }
+
+        var terminalFailure = this._findLatestBindingAction(binding, 'approval_resume_failed', 'error');
+        if (terminalFailure) {
+            return this._resumeResult(false, 'preparation_failed', binding, false, terminalFailure.sys_id);
+        }
+
+        var prepared = this._findLatestBindingAction(binding, 'approval_resume_prepared', 'analyzed');
+        if (prepared) {
+            return this._resumeResult(true, 'already_prepared', binding, false, prepared.sys_id);
+        }
+
+        var claimId = this._claimId('approval-resume', [
+            binding.migration_run_id,
+            binding.staged_ci_id,
+            binding.approval_event_id,
+            binding.simulation_fingerprint
+        ]);
+
+        var claim;
+        try {
+            claim = this._insertBindingEvent(
+                binding,
+                'analyzed',
+                'approval_resume_claimed',
+                claimId,
+                { claim_event_id: claimId }
+            );
+        } catch (claimError) {
+            return this._resumeResult(false, 'claim_conflict', binding, false);
+        }
+
+        if (!claim.won) {
+            return this._resumeResult(true, 'already_claimed', binding, false, claimId);
+        }
+
+        return this._resumeResult(true, 'claimed', binding, true, claimId);
+    },
+
+    recordApprovalResumePrepared: function(binding, claimId) {
+        if (!binding || !this._isSysId(claimId)) return false;
+
+        var eventId = this._claimId('approval-resume-prepared', [
+            binding.approval_event_id,
+            claimId
+        ]);
+
+        return this._insertBindingEvent(
+            binding,
+            'analyzed',
+            'approval_resume_prepared',
+            eventId,
+            { claim_event_id: claimId }
+        ).won;
+    },
+
+    recordApprovalResumeFailure: function(binding, claimId) {
+        if (!binding || !this._isSysId(claimId)) return false;
+
+        var eventId = this._claimId('approval-resume-failed', [
+            binding.approval_event_id,
+            claimId
+        ]);
+
+        return this._insertBindingEvent(
+            binding,
+            'error',
+            'approval_resume_failed',
+            eventId,
+            {
+                claim_event_id: claimId,
+                error_code: 'MARA_PREPARATION_FAILED'
+            }
+        ).won;
+    },
+
+    _validateApprovalRequest: function(request) {
+        if (!request || typeof request !== 'object' ||
+            Object.prototype.toString.call(request) === '[object Array]') {
+            throw new Error('Approval request must be an object');
+        }
+
+        var keys = Object.keys(request);
+        for (var i = 0; i < keys.length; i++) {
+            if (!this.APPROVAL_FIELDS[keys[i]]) {
+                throw new Error('Unknown approval request field');
+            }
+        }
+
+        var fingerprint = this._text(request.simulation_fingerprint).toUpperCase();
+        if (/^[0-9A-F]{32}$/.test(fingerprint)) {
+            var legacyError = new Error('Legacy fingerprint rejected');
+            legacyError.error_code = 'LEGACY_FINGERPRINT';
+            throw legacyError;
+        }
+        if (!/^[0-9A-F]{64}$/.test(fingerprint)) {
+            throw new Error('simulation_fingerprint must be canonical SHA-256');
+        }
+
+        return {
+            migration_run_id: this._requireSysId(request.migration_run_id, 'migration_run_id').toLowerCase(),
+            staged_ci_id: this._requireSysId(request.staged_ci_id, 'staged_ci_id').toLowerCase(),
+            finding_id: this._requireSysId(request.finding_id, 'finding_id').toLowerCase(),
+            review_decision_id: this._requireSysId(request.review_decision_id, 'review_decision_id').toLowerCase(),
+            correlation_id: this._requireToken(request.correlation_id, 'correlation_id', 160),
+            idempotency_key: this._requireToken(request.idempotency_key, 'idempotency_key', 240),
+            simulation_correlation_id: this._requireToken(request.simulation_correlation_id, 'simulation_correlation_id', 240),
+            simulation_fingerprint: fingerprint
+        };
+    },
+
+    _resolveApprovalBinding: function(request, interactive) {
+        var run = this._newRecord(this.TABLES.run);
+        if (!run.get(request.migration_run_id)) {
+            throw this._bindingError(404, 'RUN_NOT_FOUND', 'Migration run not found');
+        }
+        if (this._text(run.getValue('team_prefix')) !== this.TEAM) {
+            throw this._bindingError(403, 'RUN_OWNERSHIP_REJECTED', 'Migration run is not authorized');
+        }
+
+        var runState = this._text(run.getValue('state'));
+        if (runState !== 'awaiting_approval' && runState !== 'simulated') {
+            throw this._bindingError(409, 'RUN_STATE_INVALID', 'Migration run state does not allow approval');
+        }
+
+        var staged = this._newRecord(this.TABLES.stagedCi);
+        if (!staged.get(request.staged_ci_id)) {
+            throw this._bindingError(404, 'STAGED_CI_NOT_FOUND', 'Staged CI record not found');
+        }
+        if (this._text(staged.getValue('migration_run')).toLowerCase() !== request.migration_run_id ||
+            (this._text(staged.getValue('team_prefix')) && this._text(staged.getValue('team_prefix')) !== this.TEAM)) {
+            throw this._bindingError(403, 'STAGED_CI_OWNERSHIP_REJECTED', 'Staged CI is not authorized for this run');
+        }
+
+        var finding = this._newRecord(this.TABLES.finding);
+        if (!finding.get(request.finding_id)) {
+            throw this._bindingError(404, 'FINDING_NOT_FOUND', 'Approval finding not found');
+        }
+        if (this._text(finding.getValue('migration_run')).toLowerCase() !== request.migration_run_id ||
+            this._text(finding.getValue('staged_ci')).toLowerCase() !== request.staged_ci_id ||
+            (this._text(finding.getValue('team_prefix')) && this._text(finding.getValue('team_prefix')) !== this.TEAM) ||
+            this._text(finding.getValue('recommendation')).indexOf(this.PROPOSAL_PREFIX) !== 0) {
+            throw this._bindingError(409, 'FINDING_MISMATCH', 'Finding does not identify the simulated proposal');
+        }
+
+        var review = this._newRecord(this.TABLES.review);
+        if (!review.get(request.review_decision_id)) {
+            throw this._bindingError(404, 'APPROVAL_MISSING', 'Linked approval review was not found');
+        }
+        if (this._text(review.getValue('migration_run')).toLowerCase() !== request.migration_run_id ||
+            this._text(review.getValue('finding')).toLowerCase() !== request.finding_id ||
+            (this._text(review.getValue('team_prefix')) && this._text(review.getValue('team_prefix')) !== this.TEAM)) {
+            throw this._bindingError(409, 'REVIEW_MISMATCH', 'Review does not identify this finding and run');
+        }
+
+        var decision = this._text(review.getValue('decision'));
+        if (decision !== 'deferred' && decision !== 'approved') {
+            throw this._bindingError(409, 'REVIEW_STATE_INVALID', 'Review is not deferred for approval');
+        }
+
+        var simulation = this._latestCompletedSimulation(request);
+        if (!simulation) {
+            throw this._bindingError(409, 'SIMULATION_MISSING', 'Completed simulation evidence was not found');
+        }
+        if (this._text(simulation.finding_id).toLowerCase() !== request.finding_id) {
+            throw this._bindingError(409, 'SIMULATION_FINDING_MISMATCH', 'Latest simulation is not linked to this finding');
+        }
+        if (this._text(simulation.simulation_correlation_id) !== request.simulation_correlation_id ||
+            this._text(simulation.simulation_fingerprint).toUpperCase() !== request.simulation_fingerprint) {
+            throw this._bindingError(409, 'STALE_SIMULATION', 'Approval does not reference the latest completed simulation');
+        }
+
+        var payloadService = this._newPayloadService();
+        var strategy = this._strategyFromSimulation(simulation);
+        var bundle = strategy ?
+            payloadService.buildFromPersistedStrategy(request.migration_run_id, request.staged_ci_id, strategy) :
+            payloadService.build(request.migration_run_id, request.staged_ci_id);
+        var recomputed = this._text(payloadService.fingerprintSimulation(
+            bundle,
+            this._text(simulation.operation),
+            this._text(simulation.simulation_matched_ci),
+            strategy
+        )).toUpperCase();
+
+        if (!/^[0-9A-F]{64}$/.test(recomputed) || recomputed !== request.simulation_fingerprint) {
+            throw this._bindingError(409, 'FINGERPRINT_MISMATCH', 'Persisted simulation fingerprint is stale or mismatched');
+        }
+
+        var decidedBy = decision === 'approved' ? this._text(review.getValue('decided_by')) : this._currentUserId();
+        var binding = {
+            migration_run_id: request.migration_run_id,
+            staged_ci_id: request.staged_ci_id,
+            finding_id: request.finding_id,
+            review_decision_id: request.review_decision_id,
+            correlation_id: request.correlation_id,
+            idempotency_key: request.idempotency_key,
+            simulation_correlation_id: request.simulation_correlation_id,
+            simulation_fingerprint: recomputed,
+            decision: 'approved',
+            decision_source: 'deterministic',
+            decided_by: decidedBy,
+            policy_approved: false,
+            run_record: run,
+            review_record: review
+        };
+
+        binding.approval_event_id = this._claimId('approval-recorded', [
+            binding.migration_run_id,
+            binding.staged_ci_id,
+            binding.finding_id,
+            binding.review_decision_id,
+            binding.simulation_correlation_id,
+            binding.simulation_fingerprint
+        ]);
+
+        if (decision === 'approved') {
+            var existing = this._getEvent(binding.approval_event_id);
+            if (!existing || existing.event_type !== 'approved' ||
+                existing.migration_run_id !== binding.migration_run_id ||
+                existing.actor !== this.ACTOR || existing.team_prefix !== this.TEAM ||
+                !this._detailMatchesBinding(existing.detail, binding, 'approval_recorded')) {
+                throw this._bindingError(409, 'APPROVAL_REPLAY_REJECTED', 'Approved review does not match this exact approval replay');
+            }
+        }
+
+        return binding;
+    },
+
+    _latestCompletedSimulation: function(request) {
+        var ledger = this._newRecord(this.TABLES.ledger);
+        ledger.addQuery('migration_run', request.migration_run_id);
+        ledger.addQuery('event_type', 'simulated');
+        ledger.addQuery('actor', this.ACTOR);
+        ledger.addQuery('detail', 'CONTAINS', request.staged_ci_id);
+        ledger.orderByDesc('sequence');
+        ledger.orderByDesc('sys_created_on');
+        ledger.setLimit(50);
+        ledger.query();
+
+        while (ledger.next()) {
+            var detail = this._tryParseObject(ledger.getValue('detail'));
+            if (!detail) continue;
+            if (this._text(detail.action) !== 'ire_simulation_completed') continue;
+            if (this._text(detail.migration_run_id).toLowerCase() !== request.migration_run_id) continue;
+            if (this._text(detail.staged_ci_id).toLowerCase() !== request.staged_ci_id) continue;
+            return detail;
+        }
+
+        return null;
+    },
+
+    _strategyFromSimulation: function(detail) {
+        if (!this._text(detail.strategy_id)) return null;
+        return {
+            strategy_id: this._text(detail.strategy_id),
+            mapping_version: this._text(detail.mapping_version),
+            source_class: this._text(detail.source_class),
+            target_class: this._text(detail.target_class),
+            retry_count: this._integer(detail.retry_count),
+            max_retries: this._integer(detail.max_retries),
+            decision_source: 'deterministic'
+        };
+    },
+
+    _approveReview: function(review, userId) {
+        review.setValue('decision', 'approved');
+        review.setValue('decided_by', userId);
+        review.setValue('policy_approved', false);
+        if (!review.update()) throw new Error('Review update failed');
+    },
+
+    _attemptApprovalHandoff: function(binding, firstAttempt) {
+        var queued = this._findLatestBindingAction(binding, 'approval_handoff_queued', 'approved');
+        if (queued) return this._approvalSuccess(binding, true, true);
+
+        var attemptClaimId = binding.approval_event_id;
+        if (!firstAttempt) {
+            var failure = this._findLatestBindingAction(binding, 'approval_handoff_failed', 'error');
+            if (!failure) {
+                return {
+                    success: true,
+                    http_status: 202,
+                    state: 'approval_handoff_pending',
+                    approval_event_id: binding.approval_event_id,
+                    idempotent_replay: true,
+                    handoff_queued: false
+                };
+            }
+
+            attemptClaimId = this._claimId('approval-handoff-retry', [
+                binding.approval_event_id,
+                failure.sys_id
+            ]);
+            var retryClaim = this._insertBindingEvent(
+                binding,
+                'analyzed',
+                'approval_handoff_retry_claimed',
+                attemptClaimId,
+                { failure_event_id: failure.sys_id, claim_event_id: attemptClaimId }
+            );
+            if (!retryClaim.won) {
+                return {
+                    success: true,
+                    http_status: 202,
+                    state: 'approval_handoff_retry_claimed',
+                    approval_event_id: binding.approval_event_id,
+                    idempotent_replay: true,
+                    handoff_queued: false
+                };
+            }
+        }
+
+        try {
+            this._queueMaraEvent(binding.run_record, binding.migration_run_id, binding.approval_event_id);
+        } catch (queueError) {
+            var failureId = this._claimId('approval-handoff-failed', [
+                binding.approval_event_id,
+                attemptClaimId
+            ]);
+            try {
+                this._insertBindingEvent(
+                    binding,
+                    'error',
+                    'approval_handoff_failed',
+                    failureId,
+                    { claim_event_id: attemptClaimId, error_code: 'MARA_EVENT_QUEUE_FAILED' }
+                );
+            } catch (ignoredFailureWrite) {
+                gs.error('Unable to record sanitized Mara handoff failure.');
+            }
+            return this._approvalError(503, 'MARA_HANDOFF_FAILED', 'Approval was recorded but continuation handoff must be retried', binding, true);
+        }
+
+        var queuedId = this._claimId('approval-handoff-queued', [
+            binding.approval_event_id
+        ]);
+        try {
+            this._insertBindingEvent(
+                binding,
+                'approved',
+                'approval_handoff_queued',
+                queuedId,
+                { claim_event_id: attemptClaimId }
+            );
+        } catch (queuedMarkerError) {
+            gs.error('Mara handoff queued but its compact marker could not be persisted.');
+            return this._approvalError(503, 'HANDOFF_MARKER_FAILED', 'Continuation was handed off but its marker could not be persisted', binding, false);
+        }
+
+        return this._approvalSuccess(binding, false, true);
+    },
+
+    _bindingFromApprovalEvent: function(runId, approvalEventId) {
+        var approval = this._getEvent(approvalEventId);
+        if (!approval || approval.event_type !== 'approved' ||
+            approval.migration_run_id !== runId ||
+            approval.actor !== this.ACTOR ||
+            approval.team_prefix !== this.TEAM ||
+            this._text(approval.detail.action) !== 'approval_recorded' ||
+            this._text(approval.detail.migration_run_id).toLowerCase() !== runId) {
+            throw this._bindingError(409, 'TOKEN_NOT_FOUND', 'Approval resume token was not found');
+        }
+
+        var request = {
+            migration_run_id: this._text(approval.detail.migration_run_id).toLowerCase(),
+            staged_ci_id: this._text(approval.detail.staged_ci_id).toLowerCase(),
+            finding_id: this._text(approval.detail.finding_id).toLowerCase(),
+            review_decision_id: this._text(approval.detail.review_decision_id).toLowerCase(),
+            correlation_id: this._text(approval.detail.correlation_id),
+            idempotency_key: this._text(approval.detail.idempotency_key),
+            simulation_correlation_id: this._text(approval.detail.simulation_correlation_id),
+            simulation_fingerprint: this._text(approval.detail.simulation_fingerprint).toUpperCase()
+        };
+        request = this._validateApprovalRequest(request);
+
+        var binding = this._resolveApprovalBinding(request, false);
+        if (binding.approval_event_id !== approvalEventId ||
+            !this._detailMatchesBinding(approval.detail, binding, 'approval_recorded') ||
+            this._text(approval.detail.decision) !== 'approved' ||
+            this._text(approval.detail.decision_source) !== 'deterministic' ||
+            approval.detail.policy_approved !== false) {
+            throw this._bindingError(409, 'TOKEN_MISMATCH', 'Approval resume token no longer matches persisted evidence');
+        }
+
+        if (!this._findLatestBindingAction(binding, 'approval_handoff_queued', 'approved')) {
+            throw this._bindingError(409, 'TOKEN_NOT_QUEUED', 'Approval resume token has no completed handoff');
+        }
+
+        return binding;
+    },
+
+    _insertBindingEvent: function(binding, eventType, action, eventId, extra) {
+        var detail = this._bindingDetail(binding, action, extra);
+        var ledger = this._newRecord(this.TABLES.ledger);
+        var inserted = '';
+
+        try {
+            ledger.initialize();
+            ledger.setNewGuidValue(eventId);
+            ledger.setValue('migration_run', binding.migration_run_id);
+            if (ledger.isValidField('team_prefix')) ledger.setValue('team_prefix', this.TEAM);
+            ledger.setValue('actor', this.ACTOR);
+            ledger.setValue('event_type', eventType);
+            ledger.setValue('sequence', this._nextSequence(binding.migration_run_id));
+            ledger.setValue('detail', new DotwalkersAgentEventDetailService().build(detail));
+            inserted = this._text(ledger.insert()).toLowerCase();
+        } catch (ignoredDuplicate) {
+            inserted = '';
+        }
+
+        if (inserted === eventId) {
+            return { won: true, sys_id: eventId, detail: detail };
+        }
+
+        var existing = this._getEvent(eventId);
+        if (existing && existing.event_type === eventType &&
+            existing.migration_run_id === binding.migration_run_id &&
+            existing.actor === this.ACTOR &&
+            existing.team_prefix === this.TEAM &&
+            this._detailMatchesBinding(existing.detail, binding, action)) {
+            return { won: false, sys_id: eventId, detail: existing.detail };
+        }
+
+        throw new Error('Deterministic ledger claim failed');
+    },
+
+    _bindingDetail: function(binding, action, extra) {
+        var detail = {
+            phase: 'remediate',
+            actor: this.ACTOR,
+            action: action,
+            status: action.indexOf('failed') >= 0 ? 'failed' : 'completed',
+            summary: this._approvalSummary(action),
+            decision_source: 'deterministic',
+            migration_run_id: binding.migration_run_id,
+            staged_ci_id: binding.staged_ci_id,
+            finding_id: binding.finding_id,
+            review_decision_id: binding.review_decision_id,
+            correlation_id: binding.correlation_id,
+            idempotency_key: binding.idempotency_key,
+            simulation_correlation_id: binding.simulation_correlation_id,
+            simulation_fingerprint: binding.simulation_fingerprint,
+            approval_event_id: binding.approval_event_id,
+            decision: 'approved',
+            policy_approved: false
+        };
+        extra = extra || {};
+        var allowedExtra = ['claim_event_id', 'failure_event_id', 'error_code', 'decided_by'];
+        for (var i = 0; i < allowedExtra.length; i++) {
+            if (extra.hasOwnProperty(allowedExtra[i])) detail[allowedExtra[i]] = extra[allowedExtra[i]];
+        }
+        return detail;
+    },
+
+    _detailMatchesBinding: function(detail, binding, action) {
+        if (!detail || typeof detail !== 'object') return false;
+        return this._text(detail.action) === action &&
+            this._text(detail.decision) === 'approved' &&
+            this._text(detail.decision_source) === 'deterministic' &&
+            detail.policy_approved === false &&
+            this._text(detail.migration_run_id).toLowerCase() === binding.migration_run_id &&
+            this._text(detail.staged_ci_id).toLowerCase() === binding.staged_ci_id &&
+            this._text(detail.finding_id).toLowerCase() === binding.finding_id &&
+            this._text(detail.review_decision_id).toLowerCase() === binding.review_decision_id &&
+            this._text(detail.correlation_id) === binding.correlation_id &&
+            this._text(detail.idempotency_key) === binding.idempotency_key &&
+            this._text(detail.simulation_correlation_id) === binding.simulation_correlation_id &&
+            this._text(detail.simulation_fingerprint).toUpperCase() === binding.simulation_fingerprint &&
+            this._text(detail.approval_event_id).toLowerCase() === binding.approval_event_id;
+    },
+
+    _findLatestBindingAction: function(binding, action, eventType) {
+        var ledger = this._newRecord(this.TABLES.ledger);
+        ledger.addQuery('migration_run', binding.migration_run_id);
+        ledger.addQuery('event_type', eventType);
+        ledger.addQuery('actor', this.ACTOR);
+        ledger.addQuery('team_prefix', this.TEAM);
+        ledger.addQuery('detail', 'CONTAINS', binding.approval_event_id);
+        ledger.addQuery('detail', 'CONTAINS', action);
+        ledger.orderByDesc('sequence');
+        ledger.setLimit(50);
+        ledger.query();
+
+        while (ledger.next()) {
+            var detail = this._tryParseObject(ledger.getValue('detail'));
+            if (this._detailMatchesBinding(detail, binding, action)) {
+                return { sys_id: this._text(ledger.getUniqueValue()).toLowerCase(), detail: detail };
+            }
+        }
+        return null;
+    },
+
+    _getEvent: function(eventId) {
+        var ledger = this._newRecord(this.TABLES.ledger);
+        if (!ledger.get(eventId)) return null;
+        var detail = this._tryParseObject(ledger.getValue('detail'));
+        if (!detail) return null;
+        return {
+            sys_id: this._text(ledger.getUniqueValue()).toLowerCase(),
+            event_type: this._text(ledger.getValue('event_type')),
+            migration_run_id: this._text(ledger.getValue('migration_run')).toLowerCase(),
+            actor: this._text(ledger.getValue('actor')),
+            team_prefix: this._text(ledger.getValue('team_prefix')),
+            detail: detail
+        };
+    },
+
+    _claimId: function(namespace, parts) {
+        return this._sha256(JSON.stringify({
+            namespace: namespace,
+            parts: parts
+        })).substring(0, 32);
+    },
+
+    _bindingError: function(httpStatus, code, message) {
+        var error = new Error(code);
+        error.http_status = httpStatus;
+        error.error_code = code;
+        error.public_message = message;
+        return error;
+    },
+
+    _approvalSummary: function(action) {
+        var summaries = {
+            approval_recorded: 'Exact simulation approval recorded',
+            approval_handoff_queued: 'Mara approval continuation queued',
+            approval_handoff_retry_claimed: 'Mara handoff retry claimed',
+            approval_handoff_failed: 'Mara handoff failed safely',
+            approval_resume_claimed: 'Approval resume token claimed',
+            approval_resume_prepared: 'Approval continuation prepared',
+            approval_resume_failed: 'Approval continuation preparation failed safely'
+        };
+        return summaries[action] || 'Approval lifecycle updated';
+    },
+
+    _approvalSuccess: function(binding, replay, queued) {
+        return {
+            success: true,
+            http_status: 200,
+            state: 'approved_handoff_queued',
+            migration_run_id: binding.migration_run_id,
+            staged_ci_id: binding.staged_ci_id,
+            finding_id: binding.finding_id,
+            review_decision_id: binding.review_decision_id,
+            correlation_id: binding.correlation_id,
+            idempotency_key: binding.idempotency_key,
+            simulation_correlation_id: binding.simulation_correlation_id,
+            simulation_fingerprint: binding.simulation_fingerprint,
+            approval_event_id: binding.approval_event_id,
+            decision: 'approved',
+            decision_source: 'deterministic',
+            policy_approved: false,
+            idempotent_replay: replay === true,
+            handoff_queued: queued === true,
+            cmdb_committed: false
+        };
+    },
+
+    _approvalError: function(status, code, message, request, retryable) {
+        request = request || {};
+        return {
+            success: false,
+            http_status: status,
+            state: 'simulated_pending_approval',
+            code: code,
+            message: message,
+            retryable: retryable === true,
+            correlation_id: this._text(request.correlation_id),
+            idempotency_key: this._text(request.idempotency_key),
+            cmdb_committed: false
+        };
+    },
+
+    _resumeResult: function(success, state, binding, claimed, eventId) {
+        return {
+            success: success,
+            state: state,
+            claimed: claimed === true,
+            claim_event_id: eventId || '',
+            binding: binding ? this._resumeBinding(binding) : null,
+            cmdb_committed: false
+        };
+    },
+
+    _resumeBinding: function(binding) {
+        return {
+            migration_run_id: binding.migration_run_id,
+            staged_ci_id: binding.staged_ci_id,
+            finding_id: binding.finding_id,
+            review_decision_id: binding.review_decision_id,
+            correlation_id: binding.correlation_id,
+            idempotency_key: binding.idempotency_key,
+            simulation_correlation_id: binding.simulation_correlation_id,
+            simulation_fingerprint: binding.simulation_fingerprint,
+            approval_event_id: binding.approval_event_id,
+            decision: 'approved',
+            decision_source: 'deterministic',
+            decided_by: binding.decided_by,
+            policy_approved: false
+        };
     },
 
     _simulateError: function(

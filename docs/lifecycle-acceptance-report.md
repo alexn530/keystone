@@ -1,6 +1,6 @@
 # Autonomous Lifecycle Acceptance Report
 
-Read-only report captured on 2026-07-20 with:
+Read-only report refreshed on 2026-07-21 with:
 
 ```text
 npm.cmd run acceptance:lifecycle:report
@@ -22,6 +22,7 @@ and `relationships` with GET.
 | One retry maximum | UNAVAILABLE | Deployed ledger exposes no retry counters. |
 | Simulation fingerprint parity | FAIL | The selected CI has missing or different simulation, approval, and execution fingerprints. |
 | Approval linkage | PASS | 18 approval events are backed by 3 findings and 4 review decisions. |
+| Identifier-only approval contract | STATIC PASS | The Keystone route forwards only the exact eight binding identifiers/correlation fields and discards decision, rationale, operation, mapping, class, and payload data. |
 | Identifier-only execution contract | STATIC PASS | The Keystone route discards class, values, and payload fields. |
 | Exact execution-correlation verification | PASS | Three verification events match prior execution correlations. |
 | Refresh reconstruction | STATIC PASS | Re-derivation from cloned GET evidence is identical. |
@@ -47,3 +48,17 @@ idempotent replay, compact Event Ledger evidence, and the thin `ire_simulate`
 adapter. They invoked no live approval, Execute, Verify, event queue, or CMDB
 write action. The table above remains the dated pre-Phase-B3 read-only baseline
 until report mode is run again against refreshed lifecycle evidence.
+
+## Phase C Build-Only Status
+
+Phase C is source-controlled but deliberately not installed or live-validated.
+The separate `DotwalkersPhaseCTests.run()` suite registers 36 focused tests;
+`DotwalkersPhaseB3BTests.run()` remains byte-for-byte unchanged at 41 tests.
+Local Phase C smoke validation checks deterministic primary-key claims, exact
+parsed ledger comparisons, identifier-only approval plumbing, fixed decision
+values, preparation-only Mara behavior, and the no-live-action boundary.
+
+Remaining live acceptance work is unchanged: refresh the GET-only lifecycle
+report after deployment, run 23/23 B3A, exactly 41/41 B3B, and 36/36 Phase C,
+then obtain explicit action-time confirmation before one approval is allowed to
+continue into the later Execute-plus-Verify slice.

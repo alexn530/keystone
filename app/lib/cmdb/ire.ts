@@ -60,9 +60,10 @@ export type IreActionRequestBase = {
 export type IreSimulateRequest = IreActionRequestBase;
 
 export type IreApprovalRequest = IreActionRequestBase & {
-  decision: "approved" | "rejected" | "deferred";
-  rationale: string;
-  simulation_correlation_id?: string;
+  finding_id: ServiceNowSysId;
+  review_decision_id: ServiceNowSysId;
+  simulation_correlation_id: string;
+  simulation_fingerprint: string;
 };
 
 export type IreExecuteRequest = IreActionRequestBase & {

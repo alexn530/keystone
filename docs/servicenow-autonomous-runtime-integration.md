@@ -33,6 +33,14 @@ export.
    `servicenow/DotwalkersPhaseB3ATests.phase-b3.js`, and
    `servicenow/DotwalkersPhaseB3BTests.phase-b3.js`
    Preserve the installed server-side regression suites.
+8. `servicenow/ire_approve.phase-c.js`,
+   `servicenow/run_dotwalkers_mara.phase-c.js`, and
+   `servicenow/DotwalkersMaraAgent.phase-c.js`
+   Are complete in-place Phase C patch sources for exact approval binding,
+   recoverable handoff, token claiming, and preparation-only Mara resume.
+9. `servicenow/DotwalkersPhaseCTests.phase-c.js`
+   Is the separate 36-test, test-only Script Include. Phase B3B remains
+   byte-for-byte unchanged at 41 registrations.
 
 The Phase B3 payload supersedes the earlier Phase A payload source. Keep only
 the Phase B3 payload in deployment handoffs to avoid duplicate class sources.
@@ -48,7 +56,7 @@ the Phase B3 payload in deployment handoffs to avoid duplicate class sources.
 | `ire_execute` | Approval, duplicate, idempotency, concurrency, stale-data, and IRE-only mutation checks | Reconstruct the strategy and recompute through the same simulation service. Reject stale mapping, target, approval, action, or fingerprint evidence. |
 | `ire_approve` | Authorization, target review, and approval evidence | Bind approval to one staged CI and fingerprint, then queue `x_kest_dotwalkers.mara.requested` with a compact resume token in `parm2`. |
 | Mara Script Action | Existing event and background execution | Validate `parm2` and call the existing Mara agent in approval-resume mode. Ignore malformed, stale, or repeated tokens. |
-| `DotwalkersMaraAgent` | Existing read-only loop and Prioritize handoff | Add a bounded deterministic resume path: at most 20 actions, one approved IRE record, immediate correlation-bound Verify, reread, and stop. |
+| `DotwalkersMaraAgent` | Existing read-only loop and Prioritize handoff | Add `prepareApprovalResume(binding)`, which validates compact server-owned binding and stops before the LLM loop, Prioritize, Execute, or Verify. |
 | `ire_verify` | Read-only lookup and exact execution-correlation checks | Return compact verification and target-CI evidence for Event Ledger recording. |
 | `DotwalkersBridgeService.getHealth` and `health` | Existing GET route and compatibility response | Return health metrics only from persisted evidence. Simulation changes projected health only. |
 
@@ -59,8 +67,7 @@ the Phase B3 payload in deployment handoffs to avoid duplicate class sources.
 - Class mappings and IRE payloads are server-owned, never browser/model-owned.
 - Every decision is `model`, `deterministic`, or `deterministic_fallback`.
 - Approval authorizes exactly one staged CI at one simulation fingerprint.
-- Automatic continuation executes one IRE record and immediately verifies with
-  the returned execution correlation.
+- Phase C prepares an approved continuation but does not Execute or Verify.
 - Stale fingerprint, invalid target sys_id, repeated action, missing approval,
   stale mapping version, or correlation mismatch stops the loop.
 - Preserve role/run-ownership checks, identifier-only requests, idempotency,
@@ -71,13 +78,16 @@ the Phase B3 payload in deployment handoffs to avoid duplicate class sources.
 ## Expected Event Sequence
 
 ```text
-analysis_started -> analysis_completed -> work_grouped
-retry_selected (only for an allowlisted alias; retry_count=1)
-simulation_started -> simulation_completed -> approval_required
-approval_recorded -> x_kest_dotwalkers.mara.requested (resume token)
-execution_started -> ire_execution_completed
-verification_started -> verification_passed
-health_verified (only with exact-correlation evidence)
+ire_simulation_completed
+-> approval_recorded
+-> approval_handoff_queued
+-> x_kest_dotwalkers.mara.requested
+   parm1=<migration_run_id>
+   parm2=<approval_event_sys_id>
+-> approval_resume_claimed
+-> prepareApprovalResume
+-> approval_resume_prepared
+-> STOP
 ```
 
 Existing `event_type` choices remain authoritative. Put more specific action
@@ -90,6 +100,8 @@ names in compact detail when there is no matching existing choice.
 - Thin `ire_verify` adapter: 13/13
 - Phase B3A simulation service: 23/23
 - Phase B3B `ire_simulate` adapter and service contract: 41/41
+- Phase C approval binding and Mara preparation: 36 tests registered for the
+  later server-side deployment gate (build-only; not installed or run live)
 
 No test sent a live Approve, Execute, Verify, approval-triggering event, or CMDB
 write request.
@@ -109,3 +121,21 @@ Required confirmation:
 
 **Approve staged CI `<sys_id>` at simulation fingerprint `<fingerprint>` and
 allow its automatic single Execute plus Verify continuation.**
+
+## Phase C Deployment Manifest (Do Not Install Yet)
+
+| Table | Record | sys_id |
+|---|---|---|
+| `sys_script_include` | `DotwalkersAgentEventDetailService` | `1b4cb6842b52cb1060aefba6b891bf78` |
+| `sys_script_include` | `DotwalkersIreSimulationService` | `cf883837938e8710410e383efaba104e` |
+| `sys_ws_operation` | `ire_approve` | `8a0393d9b4b9473da9ca706d46f40f22` |
+| `sysevent_script_action` | `Run Dotwalkers Mara` | `895b3eeb2bc6071060aefba6b891bfa1` |
+| `sys_script_include` | `DotwalkersMaraAgent` | `7a36feeb2b86071060aefba6b891bfb4` |
+| `sys_script_include` | `DotwalkersPhaseCTests` (new, test-only) | `c7b8e46ae735937162613280abfcd1b4` |
+| `sysevent_register` | `x_kest_dotwalkers.mara.requested` (verify only) | `f51b36eb2bc6071060aefba6b891bf30` |
+
+`approval_recorded`, `approval_handoff_queued`,
+`approval_handoff_retry_claimed`, `approval_handoff_failed`,
+`approval_resume_claimed`, `approval_resume_prepared`, and
+`approval_resume_failed` are compact `detail.action` values. They are not new
+`event_type` choices.

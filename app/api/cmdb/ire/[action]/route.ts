@@ -79,9 +79,10 @@ export function sanitizeIreRequest(action: IreAction, incoming: Record<string, u
   if (action === "approve") {
     return {
       ...base,
-      decision: value(incoming.decision),
-      rationale: value(incoming.rationale),
+      finding_id: value(incoming.finding_id ?? incoming.findingId),
+      review_decision_id: value(incoming.review_decision_id ?? incoming.reviewDecisionId),
       simulation_correlation_id: value(incoming.simulation_correlation_id ?? incoming.simulationCorrelationId),
+      simulation_fingerprint: value(incoming.simulation_fingerprint ?? incoming.simulationFingerprint),
     };
   }
 
@@ -104,7 +105,9 @@ export function sanitizeIreRequest(action: IreAction, incoming: Record<string, u
 
 function requiredFields(action: IreAction) {
   const base = ["migration_run_id", "staged_ci_id", "correlation_id", "idempotency_key"];
-  if (action === "approve") return [...base, "decision", "rationale"];
+  if (action === "approve") {
+    return [...base, "finding_id", "review_decision_id", "simulation_correlation_id", "simulation_fingerprint"];
+  }
   if (action === "execute") return [...base, "simulation_correlation_id"];
   if (action === "verify") return [...base, "execution_correlation_id"];
   return base;

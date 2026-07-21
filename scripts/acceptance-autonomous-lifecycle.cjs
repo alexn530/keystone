@@ -83,6 +83,7 @@ async function main() {
     retryLimitCheck(detailEvents, timeline),
     simulationFingerprintParityCheck(detailEvents, timeline),
     approvalLinkageCheck(timeline, findings, reviews),
+    identifierOnlyApprovalCheck(),
     identifierOnlyExecuteCheck(),
     executionVerificationCheck(timeline),
     refreshReconstructionCheck(snapshot, reconstructed),
@@ -119,6 +120,7 @@ function acceptanceClassification(item) {
   const staticChecks = new Set([
     "read-only",
     "work-grouping",
+    "identifier-only-approval",
     "identifier-only-execute",
     "refresh-reconstruction",
   ]);
@@ -224,6 +226,30 @@ function identifierOnlyExecuteCheck() {
   assert.deepEqual(Object.keys(sanitized).sort(), ["correlation_id", "idempotency_key", "migration_run_id", "simulation_correlation_id", "staged_ci_id"]);
   assert.equal(JSON.stringify(sanitized).includes("must-not-pass"), false);
   return check("identifier-only-execute", "Identifier-only execution contract", "pass", "Browser Execute requests discard target class, values, and payload fields.");
+}
+
+function identifierOnlyApprovalCheck() {
+  const sanitized = sanitizeIreRequest("approve", {
+    migration_run_id: options.run,
+    staged_ci_id: options.stagedCi,
+    finding_id: "33333333333333333333333333333333",
+    review_decision_id: "44444444444444444444444444444444",
+    correlation_id: "ks-approve-acceptance",
+    idempotency_key: `approve:${options.run}:${options.stagedCi}:acceptance`,
+    simulation_correlation_id: "ks-simulate-acceptance",
+    simulation_fingerprint: "A".repeat(64),
+    decision: "approved",
+    rationale: "must-not-pass",
+    operation: "UPDATE",
+    mapping: { source: "must-not-pass" },
+    payload: { values: { name: "must-not-pass" } },
+  });
+  assert.deepEqual(Object.keys(sanitized).sort(), [
+    "correlation_id", "finding_id", "idempotency_key", "migration_run_id", "review_decision_id",
+    "simulation_correlation_id", "simulation_fingerprint", "staged_ci_id",
+  ]);
+  assert.equal(JSON.stringify(sanitized).includes("must-not-pass"), false);
+  return check("identifier-only-approval", "Identifier-only approval contract", "pass", "Browser Approval requests forward only exact binding identifiers and correlation metadata.");
 }
 
 function executionVerificationCheck(timeline) {

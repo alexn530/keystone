@@ -1014,7 +1014,12 @@ function RemediateView(props: {
   const approved = Boolean((workbench.approval?.success && workbench.approval.status === "approved") || selectedQueueItem?.review?.decision === "approved");
   const rejected = Boolean((workbench.approval?.success && workbench.approval.status === "rejected") || selectedQueueItem?.review?.decision === "rejected");
   const liveRunReady = Boolean(activeRunId && selectedCi && apiState !== "demo");
-  const approvable = lifecycle === "simulated_pending_approval" && Boolean(simulationCorrelation && selectedQueueItem?.simulationFingerprint);
+  const approvable = lifecycle === "simulated_pending_approval" && Boolean(
+    simulationCorrelation &&
+    selectedQueueItem?.simulationFingerprint &&
+    selectedQueueItem.finding?.id &&
+    selectedQueueItem.review?.id
+  );
   const selectedActivity = selectedCi ? timeline
     .filter(event => {
       const haystack = `${event.recordName} ${event.reasoning} ${event.name}`.toLowerCase();
@@ -1067,10 +1072,13 @@ function RemediateView(props: {
   }
 
   function approve(decision: "approved" | "rejected") {
+    if (decision !== "approved" || !selectedQueueItem?.finding?.id || !selectedQueueItem.review?.id ||
+        !simulationCorrelation || !selectedQueueItem.simulationFingerprint) return;
     void runIreAction("approve", {
-      decision,
-      rationale: rationale.trim() || `${decision === "approved" ? "Approved" : "Rejected"} after reviewing the simulation evidence.`,
-      ...(simulationCorrelation ? { simulation_correlation_id: simulationCorrelation } : {}),
+      finding_id: selectedQueueItem.finding.id,
+      review_decision_id: selectedQueueItem.review.id,
+      simulation_correlation_id: simulationCorrelation,
+      simulation_fingerprint: selectedQueueItem.simulationFingerprint,
     });
   }
 

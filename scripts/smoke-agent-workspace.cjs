@@ -74,6 +74,26 @@ assert.deepEqual(Object.keys(execute).sort(), [
 ]);
 assert.equal(JSON.stringify(execute).includes("must-not-pass"), false);
 
+const approve = sanitizeIreRequest("approve", {
+  migration_run_id: runId,
+  staged_ci_id: cis[0].id,
+  finding_id: "33333333333333333333333333333333",
+  review_decision_id: "44444444444444444444444444444444",
+  correlation_id: "ks-approve-1",
+  idempotency_key: "keystone:approve:1",
+  simulation_correlation_id: "ks-sim-1",
+  simulation_fingerprint: "A".repeat(64),
+  decision: "rejected",
+  rationale: "must-not-pass",
+  operation: "UPDATE",
+  payload: { dangerous: true },
+});
+assert.deepEqual(Object.keys(approve).sort(), [
+  "correlation_id", "finding_id", "idempotency_key", "migration_run_id", "review_decision_id",
+  "simulation_correlation_id", "simulation_fingerprint", "staged_ci_id",
+]);
+assert.equal(JSON.stringify(approve).includes("must-not-pass"), false);
+
 console.log("agent workspace smoke checks passed");
 
 function ci(id, name, className, status) {
