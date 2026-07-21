@@ -170,11 +170,12 @@ export function MaraCompanion(props: MaraCompanionProps) {
   const stateSlug = derivation.state.replace("_", "-");
   const emphasis = !muted && open ? " mara-emphasis" : "";
   const collapsed = ` mara-${stateSlug}`;
+  const openClass = open ? " mara-open" : "";
 
   return (
     <div
       ref={rootRef}
-      className={`mara-companion${collapsed}${emphasis}${muted ? " mara-muted" : ""}`}
+      className={`mara-companion${collapsed}${emphasis}${muted ? " mara-muted" : ""}${openClass}`}
       data-state={derivation.state}
     >
       {open && (
