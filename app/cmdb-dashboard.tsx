@@ -51,6 +51,12 @@ import { ImportGatewayView, type ImportedRun } from "./import-view";
 import { MaraCompanion } from "./mara-companion";
 import { AgentWorkspaceView } from "./agent-workspace";
 import { deriveWorkspaceViewState } from "./lib/cmdb/workspace-view-state";
+import { PageNavigation } from "./components/PageNavigation";
+import {
+  externalHrefFor,
+  navigationItems,
+  type NavSectionId,
+} from "./lib/nav/navigation";
 
 type ApiState = "connecting" | "live" | "partial" | "demo" | "error";
 type AnalysisState = "idle" | "starting" | "started" | "error";
@@ -156,7 +162,13 @@ export function CmdbDashboard() {
   const [activeRunLabel, setActiveRunLabel] = useState("");
   const [runDraft, setRunDraft] = useState("");
   const [livePaused, setLivePaused] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      if (typeof window === "undefined") return false;
+      return window.localStorage.getItem("keystone.sidebar.collapsed") === "1";
+    } catch { return false; }
+  });
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [liveRefreshing, setLiveRefreshing] = useState(false);
   const [liveRefreshCount, setLiveRefreshCount] = useState(0);
   const liveRefreshInFlight = useRef(false);
@@ -164,6 +176,15 @@ export function CmdbDashboard() {
   // the request resolves so rerenders and retries cannot start it twice.
   const comprehendStarted = useRef(new Set<string>());
   const pollInFlight = useRef(false);
+
+  // Persist collapse preference. Ignored if localStorage is blocked.
+  useEffect(() => {
+    try {
+      if (typeof window === "undefined") return;
+      if (sidebarCollapsed) window.localStorage.setItem("keystone.sidebar.collapsed", "1");
+      else window.localStorage.removeItem("keystone.sidebar.collapsed");
+    } catch { /* ignore */ }
+  }, [sidebarCollapsed]);
 
   useEffect(() => {
     const restoredRun = currentRunFromLocation();
@@ -488,27 +509,78 @@ export function CmdbDashboard() {
     }
   }
 
-  const nav: { id: Section | "ai-usage"; label: string; detail: string; icon: IconName; href?: string }[] = [
-    { id: "import", label: "Import", detail: "Bring data in", icon: "upload" },
-    { id: "workspace", label: "Agent Workspace", detail: "Watch the run progress", icon: "spark" },
-    { id: "approvals", label: "Approvals", detail: "Authorize governed work", icon: "shield" },
-    { id: "evidence", label: "Evidence", detail: "Inspect durable activity", icon: "clock" },
-    { id: "ai-usage", label: "AI Usage", detail: "Review model activity", icon: "pulse", href: activeRunId ? "/ai-usage?run=" + encodeURIComponent(activeRunId) : "/ai-usage" },
-  ];
+  // Sections that appear in the shared nav config map 1:1 to internal Section
+  // ids except "verify" — the durable-evidence view for this app is the
+  // existing evidence section.
+  const sectionToNavId = (input: Section): NavSectionId | undefined => {
+    if (input === "evidence" || input === "live") return "verify";
+    if (input === "hr") return undefined;
+    return input as NavSectionId;
+  };
+  const navToSection = (input: NavSectionId): Section => (input === "verify" ? "evidence" : input as Section);
+  const currentNavId: NavSectionId = sectionToNavId(section) ?? "workspace";
+  const openNavId = (id: NavSectionId) => {
+    if (id === "ai-usage") {
+      const href = externalHrefFor(id, activeRunId);
+      if (href) window.location.assign(href);
+      return;
+    }
+    setSection(navToSection(id));
+    setMobileNavOpen(false);
+  };
 
-  return <div className={`app-shell${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
-    <aside className="sidebar" aria-hidden={sidebarCollapsed}>
-      <div className="brand"><span className="brand-mark"><span /></span><div><strong>CMDB</strong><small>MODERNIZATION CONTROL</small></div></div>
+  return <div className={"app-shell"
+      + (sidebarCollapsed ? " sidebar-collapsed" : "")
+      + (mobileNavOpen ? " mobile-nav-open" : "")}>
+    {mobileNavOpen && <div className="mobile-nav-backdrop" onClick={() => setMobileNavOpen(false)} aria-hidden="true" />}
+    <aside className="sidebar" aria-label="Primary navigation">
+      <div className="brand">
+        <span className="brand-mark"><span /></span>
+        <div className="brand-copy"><strong>CMDB</strong><small>MODERNIZATION CONTROL</small></div>
+        <button
+          type="button"
+          className="sidebar-collapse"
+          aria-label={sidebarCollapsed ? "Expand navigation" : "Collapse navigation"}
+          aria-expanded={!sidebarCollapsed}
+          title={sidebarCollapsed ? "Expand navigation" : "Collapse navigation"}
+          onClick={() => setSidebarCollapsed(current => !current)}
+        >
+          <Icon name="chevron" size={14} />
+        </button>
+      </div>
       <nav className="main-nav" aria-label="Main navigation">
-        {nav.map(item => item.href
-          ? <a key={item.id} className="nav-link" href={item.href} aria-label={item.label + ": " + item.detail} title={item.label}><span className="nav-icon"><Icon name={item.icon} /></span><span><strong>{item.label}</strong><small>{item.detail}</small></span><Icon name="chevron" size={14} /></a>
-          : <button key={item.id} aria-label={item.label + ": " + item.detail} title={item.label} className={section === item.id ? "active" : ""} onClick={() => setSection(item.id as Section)}>
-              <span className="nav-icon"><Icon name={item.icon} /></span><span><strong>{item.label}</strong><small>{item.detail}</small></span><Icon name="chevron" size={14} />
-            </button>)}
+        {navigationItems.map(item => {
+          const disabled = item.requiresRun && !activeRunId && !item.external;
+          const active = !item.external && item.id === currentNavId;
+          const labelText = item.label + ": " + item.detail;
+          const commonProps = {
+            "aria-label": labelText,
+            title: sidebarCollapsed ? item.label : labelText,
+            className: (active ? "active" : "") + (disabled ? " disabled" : ""),
+          } as const;
+          if (item.external) {
+            const href = externalHrefFor(item.id, activeRunId) ?? "#";
+            return <a key={item.id} className={"nav-link " + commonProps.className} aria-label={commonProps["aria-label"]} title={commonProps.title} href={href} onClick={() => setMobileNavOpen(false)}>
+              <span className="nav-icon"><Icon name={item.icon} /></span>
+              <span className="nav-copy"><strong>{item.label}</strong><small>{item.detail}</small></span>
+              <Icon name="chevron" size={14} />
+            </a>;
+          }
+          return <button
+            key={item.id}
+            {...commonProps}
+            disabled={disabled}
+            onClick={() => openNavId(item.id)}
+          >
+            <span className="nav-icon"><Icon name={item.icon} /></span>
+            <span className="nav-copy"><strong>{item.label}</strong><small>{item.detail}</small></span>
+            <Icon name="chevron" size={14} />
+          </button>;
+        })}
       </nav>
       <div className="sidebar-rule" />
       <div className="governance-card"><span className="shield"><Icon name="shield" size={17} /></span><div><small>GOVERNANCE LOCK</small><strong>IRE is the only write path</strong><p>Every CMDB mutation is reconciled, attributed, and logged.</p></div></div>
-      <div className="sidebar-bottom"><div className={`api-dot ${apiState}`} /><div><strong>{apiState === "live" ? "Live API" : apiState === "partial" ? "Partial API" : apiState === "connecting" ? "Connecting" : apiState === "error" ? "API error" : "Demo snapshot"}</strong><small>Last sync {lastSync}</small></div><button onClick={() => void loadData(activeRunId)} aria-label="Refresh data"><Icon name="refresh" size={16} /></button></div>
+      <div className="sidebar-bottom"><div className={`api-dot ${apiState}`} /><div><strong>{apiState === "live" ? "Live API" : apiState === "partial" ? "Partial API" : apiState === "connecting" ? "Connecting" : apiState === "error" ? "API error" : "Demo snapshot"}</strong><small>Last sync {lastSync}</small></div><button onClick={() => void loadData(activeRunId)} aria-label="Refresh data" title="Refresh data"><Icon name="refresh" size={16} /></button></div>
     </aside>
 
     <main className="main-content">
@@ -517,9 +589,17 @@ export function CmdbDashboard() {
           <button
             type="button"
             className="sidebar-toggle"
-            aria-label={sidebarCollapsed ? "Open navigation" : "Close navigation"}
-            aria-expanded={!sidebarCollapsed}
-            onClick={() => setSidebarCollapsed(current => !current)}
+            aria-label={mobileNavOpen ? "Close navigation" : sidebarCollapsed ? "Expand navigation" : "Collapse navigation"}
+            aria-expanded={mobileNavOpen || !sidebarCollapsed}
+            onClick={() => {
+              // On narrow viewports the topbar button opens the mobile drawer;
+              // on wider viewports it toggles the persistent collapse state.
+              if (typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches) {
+                setMobileNavOpen(current => !current);
+              } else {
+                setSidebarCollapsed(current => !current);
+              }
+            }}
           >
             <Icon name="menu" size={18} />
           </button>
@@ -536,6 +616,12 @@ export function CmdbDashboard() {
       {section === "hr" && <AgentHrView timeline={timeline} timelineLive={resourceState.timeline === "live"} cis={resourceState.cis === "live" ? cis : null} activeRunId={activeRunId} />}
       {section === "prioritize" && <PrioritizeView health={health} recalculating={apiState === "connecting"} onRecalculate={() => void loadData(activeRunId)} onFix={(fix) => { setQueuedFix(fix); setActionMessage(""); setSection("remediate"); }} />}
       {section === "remediate" && <RemediateView health={health} cis={cis} timeline={timeline} findings={findings} reviews={reviews} activeRunId={activeRunId} apiState={apiState} queuedFix={queuedFix} initialStagedCiId={remediationTargetId} actionMessage={actionMessage} onSelect={(fix) => { setQueuedFix(fix); setActionMessage(""); }} onSubmit={submitRemediation} />}
+
+      <PageNavigation
+        currentSection={currentNavId}
+        activeRunId={activeRunId}
+        onNavigate={openNavId}
+      />
     </main>
 
     {selectedCi && <ProvenancePanel ci={selectedCi} onClose={() => setSelectedCi(null)} onOpenLedger={openEventLedger} />}
