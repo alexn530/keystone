@@ -279,25 +279,19 @@ function HealthStrip({ view }: { view: WorkspaceViewState }) {
 }
 
 function LiveAgentPlanPanel({ view }: { view: WorkspaceViewState }) {
-  const latest = view.snapshot.recentActivity.at(-1);
-  const priorCompleted = [...view.snapshot.recentActivity].reverse().find(event => event.status === "complete");
-  const currentPhaseLabel = view.snapshot.phases.find(p => p.id === latest?.phase)?.label
-    ?? phaseLabelForId(view.activePhase);
-  const nextPhaseId = nextPhaseAfter(view.activePhase);
-  const nextPhaseLabel = phaseLabelForId(nextPhaseId);
-  const hasData = Boolean(latest);
+  const hasData = view.activityCards.length > 0 || view.requiresApproval;
   return <section className="panel live-plan-panel">
     <div className="panel-heading compact">
       <div><span className="section-index">02</span><div><h2>Live agent plan</h2><p>Recorded activity — not chain-of-thought.</p></div></div>
       <span className={"plan-source-pill " + (hasData ? "live" : "empty")}>{hasData ? "Event Ledger" : "Awaiting data"}</span>
     </div>
     {hasData ? <div className="live-plan-grid">
-      <PlanCell label="Current phase" value={currentPhaseLabel} />
-      <PlanCell label="Current agent" value={latest?.actor ?? "—"} />
-      <PlanCell label="Current tool" value={toolFromSummary(latest?.summary) ?? "—"} />
-      <PlanCell label="Current action" value={truncate(latest?.title, 90)} />
-      <PlanCell label="Latest completed result" value={truncate(priorCompleted?.summary ?? "—", 120)} />
-      <PlanCell label="Next phase" value={nextPhaseLabel} />
+      <PlanCell label="Current phase" value={phaseLabelForId(view.activePhase)} />
+      <PlanCell label="Current agent" value={view.currentAgent || "—"} />
+      <PlanCell label="Current tool" value={view.currentTool ?? "—"} />
+      <PlanCell label="Current action" value={truncate(view.currentAction, 120)} />
+      <PlanCell label="Latest completed result" value={truncate(view.latestResult, 130)} />
+      <PlanCell label="Next phase" value={view.nextPhase ? phaseLabelForId(view.nextPhase) : view.nextAction} />
     </div> : <div className="live-plan-empty">
       <Icon name="clock" size={22} />
       <strong>Waiting for recorded activity</strong>
@@ -314,7 +308,7 @@ function PlanCell({ label, value }: { label: string; value: string }) {
 }
 
 function ActivityStreamPanel({ view, onOpenEvidence }: { view: WorkspaceViewState; onOpenEvidence: () => void }) {
-  const events = [...view.snapshot.recentActivity].slice(-8).reverse();
+  const events = [...view.activityCards].slice(-8).reverse();
   const [expanded, setExpanded] = useState<string | null>(null);
   return <section className="panel activity-stream">
     <div className="panel-heading compact">
@@ -327,26 +321,30 @@ function ActivityStreamPanel({ view, onOpenEvidence }: { view: WorkspaceViewStat
       </button>
     </div>
     <div className="activity-stream-list">
-      {events.map(event => {
-        const isOpen = expanded === event.id;
-        const ledgerItem = findQueueEvidence(view, event);
-        return <article key={event.id} className={"activity-row " + event.status + (isOpen ? " open" : "")}>
-          <button className="activity-row-top" onClick={() => setExpanded(current => (current === event.id ? null : event.id))} aria-expanded={isOpen}>
-            <span className={"event-status " + event.status} />
+      {events.map(card => {
+        const isOpen = expanded === card.id;
+        const ledgerItem = view.queue.items.find(item => item.latestEvent?.id === card.id);
+        return <article key={card.id} className={"activity-row " + card.status + (isOpen ? " open" : "")}>
+          <button className="activity-row-top" onClick={() => setExpanded(current => (current === card.id ? null : card.id))} aria-expanded={isOpen}>
+            <span className={"event-status " + card.status} />
             <div className="activity-row-copy">
-              <small>{new Date().toISOString().slice(11, 19)} · {event.actor} · {toolFromSummary(event.summary) ?? event.phase}</small>
-              <strong>{event.title}</strong>
-              <p>{truncate(event.summary, 160)}</p>
+              <small>#{card.seq} · {card.actor} · {card.tool ?? card.phase}</small>
+              <strong>{card.headline}</strong>
+              <p>{truncate(card.summary, 200)}</p>
             </div>
-            <span className={"activity-status-pill " + event.status}>{event.status}</span>
+            <span className={"activity-status-pill " + card.status}>{card.status}</span>
           </button>
           {isOpen && <div className="activity-row-detail">
             <dl>
               <dt>Affected CI</dt><dd>{ledgerItem?.ci?.name ?? "—"}</dd>
               <dt>Finding IDs</dt><dd>{ledgerItem?.finding?.number ?? "—"}</dd>
-              <dt>Sequence</dt><dd>#{event.seq}</dd>
-              <dt>Decision source</dt><dd>{event.decisionSource.replaceAll("_", " ")}</dd>
+              <dt>Phase</dt><dd>{card.phase}</dd>
+              <dt>Sequence</dt><dd>#{card.seq}</dd>
             </dl>
+            <details className="activity-technical">
+              <summary>Technical evidence</summary>
+              <pre>{card.technical}</pre>
+            </details>
           </div>}
         </article>;
       })}
@@ -409,10 +407,6 @@ function EmptyWorkspaceState({ title, detail }: { title: string; detail: string 
   return <div className="workspace-empty"><Icon name="spark" size={20} /><strong>{title}</strong><p>{detail}</p></div>;
 }
 
-function findQueueEvidence(view: WorkspaceViewState, event: WorkspaceViewState["snapshot"]["recentActivity"][number]) {
-  return view.queue.items.find(item => item.latestEvent?.id === event.id);
-}
-
 function phaseLabelForId(id: WorkspacePhaseId | undefined) {
   if (!id) return "—";
   const labels: Record<WorkspacePhaseId, string> = {
@@ -422,18 +416,6 @@ function phaseLabelForId(id: WorkspacePhaseId | undefined) {
     verify: "Verify",
   };
   return labels[id];
-}
-
-function nextPhaseAfter(current: WorkspacePhaseId): WorkspacePhaseId | undefined {
-  const order: WorkspacePhaseId[] = ["comprehend", "prioritize", "remediate", "verify"];
-  const index = order.indexOf(current);
-  return index >= 0 && index < order.length - 1 ? order[index + 1] : undefined;
-}
-
-function toolFromSummary(summary?: string): string | null {
-  if (!summary) return null;
-  const match = summary.match(/tool[=:\s]+([A-Za-z0-9_.-]+)/i);
-  return match ? match[1] : null;
 }
 
 function truncate(value: string | undefined, limit: number) {

@@ -50,6 +50,7 @@ import { AgentHrView } from "./hr-view";
 import { ImportGatewayView, type ImportedRun } from "./import-view";
 import { MaraCompanion } from "./mara-companion";
 import { AgentWorkspaceView } from "./agent-workspace";
+import { deriveWorkspaceViewState } from "./lib/cmdb/workspace-view-state";
 
 type ApiState = "connecting" | "live" | "partial" | "demo" | "error";
 type AnalysisState = "idle" | "starting" | "started" | "error";
@@ -408,6 +409,20 @@ export function CmdbDashboard() {
     return () => window.clearInterval(timer);
   }, [playing, timeline.length]);
 
+  const workspaceView = useMemo(() => deriveWorkspaceViewState({
+    runLabel: activeRunLabel,
+    runId: activeRunId,
+    runState: runRecord?.state ?? "",
+    apiState,
+    analysisState,
+    cis,
+    timeline,
+    relationships,
+    findings,
+    reviews,
+    health,
+  }), [activeRunLabel, activeRunId, runRecord?.state, apiState, analysisState, cis, timeline, relationships, findings, reviews, health]);
+
   const filteredCis = useMemo(() => cis.filter(ci => {
     const matches = `${ci.name} ${ci.className} ${ci.source} ${ci.ip}`.toLowerCase().includes(search.toLowerCase());
     return matches && (filter === "all" || ci.status !== "live");
@@ -538,8 +553,10 @@ export function CmdbDashboard() {
       findings={findings}
       reviews={reviews}
       queuedFix={queuedFix}
+      view={workspaceView}
       onNavigate={next => setSection(next)}
       onOpenLedger={openEventLedger}
+      onOpenApprovals={() => setSection("approvals")}
       onShowReviewQueue={() => { setFilter("review"); setSection("comprehend"); }}
     />
   </div>;
