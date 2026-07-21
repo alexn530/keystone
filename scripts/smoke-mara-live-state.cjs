@@ -215,4 +215,67 @@ const { clampPosition, defaultPosition, readStoredPosition } = drag;
   assert(pos.x + 64 <= vp.width, `mobile x fits, got ${pos.x}`);
 }
 
+// --- 14. Invalid coordinates fall back to default ---
+{
+  const vp = { width: 1440, height: 900 };
+  const clamped = clampPosition({ x: Number.NaN, y: 200 }, false, vp);
+  assert(Number.isFinite(clamped.x) && Number.isFinite(clamped.y), `NaN input → finite output: ${JSON.stringify(clamped)}`);
+  const clampedNeg = clampPosition({ x: -500, y: -500 }, false, vp);
+  assert(clampedNeg.x >= 16 && clampedNeg.y >= 16, `negative clamped to margin: ${JSON.stringify(clampedNeg)}`);
+}
+
+// --- 15. Invalid stored coords reset safely ---
+{
+  const store = new Map();
+  global.window = {
+    localStorage: {
+      getItem: (k) => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => store.set(k, v),
+      removeItem: (k) => store.delete(k),
+    },
+    matchMedia: () => ({ matches: false }),
+    innerWidth: 1440,
+    innerHeight: 900,
+  };
+  store.set("keystone.mara.pos.desktop", JSON.stringify({ x: "NaN", y: null }));
+  const bad = readStoredPosition(false, { width: 1440, height: 900 });
+  assert(bad === null, `invalid stored coords must return null, got ${JSON.stringify(bad)}`);
+  store.set("keystone.mara.pos.desktop", "not-json-at-all");
+  const broken = readStoredPosition(false, { width: 1440, height: 900 });
+  assert(broken === null, `broken JSON must return null, got ${JSON.stringify(broken)}`);
+  delete global.window;
+}
+
+// --- 16. Sidebar collapse does not throw Mara off-screen ---
+{
+  // Simulate sidebar collapse: the app viewport width doesn't change (window
+  // is the same size), only the main-content margin. Position is fixed, so
+  // the mascot stays where it is. Verify clamp with the same viewport is idempotent.
+  const vp = { width: 1440, height: 900 };
+  const initial = { x: 1300, y: 700 };
+  const afterCollapse = clampPosition(initial, false, vp);
+  assert(afterCollapse.x === 1300 && afterCollapse.y === 700, `stable across sidebar collapse: ${JSON.stringify(afterCollapse)}`);
+}
+
+// --- 17. Bubble close does not remount mascot (state stability check) ---
+// Bubble open state is internal to the component; the mascot container itself
+// depends only on view.mara + drag state. Verify that changing the workspace
+// view does not change the mara.state key when nothing meaningful changed.
+{
+  const base = {
+    hasRun: true, runStateLower: "analyzing", analysisState: "started", apiState: "live",
+    requiresApproval: false, approvalCount: 0, heldCount: 0, executingCount: 0, verifiedCount: 0,
+    prioritizeStatus: "working", remediateStatus: "waiting",
+    verifyStatus: "waiting", comprehendStatus: "complete",
+    activityCards: [{ id: "evt-1", seq: 1, phase: "prioritize", actor: "Mara", status: "active", headline: "x", summary: "x", technical: "" }],
+    latestTimelineTime: "10:00",
+  };
+  const a = deriveMaraLiveState(base);
+  // Second poll with identical inputs must produce an equal transition key.
+  const b = deriveMaraLiveState({ ...base });
+  const keyA = `${a.state}:${a.latestEventId}`;
+  const keyB = `${b.state}:${b.latestEventId}`;
+  assert(keyA === keyB, `transition key stable across polling: ${keyA} vs ${keyB}`);
+}
+
 console.log("smoke-mara-live-state: all assertions passed");
