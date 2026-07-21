@@ -51,6 +51,12 @@ import { deriveWorkspaceViewState } from "./lib/cmdb/workspace-view-state";
 import { PageNavigation } from "./components/PageNavigation";
 import { formatTechnicalSource, parseMaraObservation } from "./lib/cmdb/mara-observation";
 import {
+  EndpointError,
+  classifyEndpointStatus,
+  extractComprehendError,
+  friendlyIreError,
+} from "./lib/cmdb/frontend-errors";
+import {
   externalHrefFor,
   navigationItems,
   type NavSectionId,
@@ -59,7 +65,7 @@ import {
 type ApiState = "connecting" | "live" | "partial" | "demo" | "error";
 type AnalysisState = "idle" | "starting" | "started" | "error";
 type ResourceName = "cis" | "timeline" | "relationships" | "health" | "findings" | "reviews";
-type ResourceStatus = "connecting" | "live" | "error";
+type ResourceStatus = "connecting" | "live" | "unavailable" | "error";
 type ResourceState = Record<ResourceName, ResourceStatus>;
 type Section = "import" | "workspace" | "approvals" | "evidence" | "comprehend" | "live" | "hr" | "prioritize" | "remediate";
 type IreWorkbenchRecord = {
@@ -88,10 +94,40 @@ const emptyHealth: HealthData = {
 };
 
 async function readEndpoint(resource: ResourceName, runId = "") {
-  const query = runId ? `?run=${encodeURIComponent(runId)}` : "";
-  const response = await fetch(`/api/cmdb/${resource}${query}`, { cache: "no-store" });
-  if (!response.ok) throw new Error(`${resource}: ${response.status}`);
+  const hasRun = Boolean(runId);
+  const query = hasRun ? `?run=${encodeURIComponent(runId)}` : "";
+  let response: Response;
+  try {
+    response = await fetch(`/api/cmdb/${resource}${query}`, { cache: "no-store" });
+  } catch (error) {
+    throw new EndpointError(resource, 0, "backend", error instanceof Error ? error.message : "network error");
+  }
+  if (!response.ok) {
+    let detail: string | undefined;
+    try {
+      const body = await response.clone().json() as Record<string, unknown>;
+      const nested = body.result && typeof body.result === "object" && !Array.isArray(body.result)
+        ? body.result as Record<string, unknown>
+        : undefined;
+      detail = typeof body.error === "string" ? body.error
+        : typeof body.message === "string" ? body.message
+        : nested && typeof nested.error === "string" ? nested.error
+        : nested && typeof nested.message === "string" ? nested.message
+        : undefined;
+    } catch { /* body not JSON, ignore */ }
+    throw new EndpointError(resource, response.status, classifyEndpointStatus(response.status, hasRun), detail);
+  }
   return response.json();
+}
+
+/** Map an EndpointError to a ResourceStatus. Unknown errors default to "error". */
+function endpointErrorToStatus(error: unknown): ResourceStatus {
+  if (error instanceof EndpointError) {
+    if (error.kind === "unavailable") return "unavailable";
+    if (error.kind === "client") return "error";
+    return "error";
+  }
+  return "error";
 }
 
 // Sections that reflect backend pipeline progress and therefore poll while a run works.
@@ -202,16 +238,38 @@ export function CmdbDashboard() {
   }, []);
 
   const loadData = useCallback(async (runId: string) => {
-    setApiState("connecting");
-    setResourceState(connectingResources);
-    if (runId) {
+    // Cold state (no active run): skip every read endpoint. Unscoped calls
+    // return globally-scoped data that is misleading to render as if it
+    // belonged to a run, and run-scoped calls will 400 with "Missing run
+    // parameter". Leave every resource as idle/unavailable — the UI shows an
+    // empty state until the user selects or imports a run.
+    if (!runId) {
       setCis([]);
       setTimeline([]);
       setRelationships([]);
       setHealth(emptyHealth);
       setFindings([]);
       setReviews([]);
+      setActiveStep(0);
+      setPlaying(false);
+      setResourceState({
+        cis: "unavailable", timeline: "unavailable", relationships: "unavailable",
+        health: "unavailable", findings: "unavailable", reviews: "unavailable",
+      });
+      setApiState("demo");
+      setRunRecord(null);
+      setLastSync(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+      return;
     }
+
+    setApiState("connecting");
+    setResourceState(connectingResources);
+    setCis([]);
+    setTimeline([]);
+    setRelationships([]);
+    setHealth(emptyHealth);
+    setFindings([]);
+    setReviews([]);
 
     const results = await Promise.allSettled(resourceNames.map(resource => readEndpoint(resource, runId)));
     const nextResourceState = { ...connectingResources };
@@ -222,47 +280,48 @@ export function CmdbDashboard() {
     let nextFindings: RemediationFinding[] = [];
     let nextReviews: RemediationReview[] = [];
     let liveCount = 0;
+    let backendErrorCount = 0;
     if (results[0].status === "fulfilled") {
       nextCis = normalizeComprehendCis(results[0].value);
-      nextResourceState.cis = "live";
-      liveCount++;
+      nextResourceState.cis = "live"; liveCount++;
     } else {
-      nextResourceState.cis = "error";
+      nextResourceState.cis = endpointErrorToStatus(results[0].reason);
+      if (nextResourceState.cis === "error") backendErrorCount++;
     }
     if (results[1].status === "fulfilled") {
       nextTimeline = normalizeComprehendTimeline(results[1].value);
-      nextResourceState.timeline = "live";
-      liveCount++;
+      nextResourceState.timeline = "live"; liveCount++;
     } else {
-      nextResourceState.timeline = "error";
+      nextResourceState.timeline = endpointErrorToStatus(results[1].reason);
+      if (nextResourceState.timeline === "error") backendErrorCount++;
     }
     if (results[2].status === "fulfilled") {
       nextRelationships = normalizeComprehendRelationships(results[2].value);
-      nextResourceState.relationships = "live";
-      liveCount++;
+      nextResourceState.relationships = "live"; liveCount++;
     } else {
-      nextResourceState.relationships = "error";
+      nextResourceState.relationships = endpointErrorToStatus(results[2].reason);
+      if (nextResourceState.relationships === "error") backendErrorCount++;
     }
     if (results[3].status === "fulfilled") {
       nextHealth = normalizeComprehendHealth(results[3].value);
-      nextResourceState.health = "live";
-      liveCount++;
+      nextResourceState.health = "live"; liveCount++;
     } else {
-      nextResourceState.health = "error";
+      nextResourceState.health = endpointErrorToStatus(results[3].reason);
+      if (nextResourceState.health === "error") backendErrorCount++;
     }
     if (results[4].status === "fulfilled") {
       nextFindings = normalizeRemediationFindings(results[4].value);
-      nextResourceState.findings = "live";
-      liveCount++;
+      nextResourceState.findings = "live"; liveCount++;
     } else {
-      nextResourceState.findings = "error";
+      nextResourceState.findings = endpointErrorToStatus(results[4].reason);
+      if (nextResourceState.findings === "error") backendErrorCount++;
     }
     if (results[5].status === "fulfilled") {
       nextReviews = normalizeRemediationReviews(results[5].value);
-      nextResourceState.reviews = "live";
-      liveCount++;
+      nextResourceState.reviews = "live"; liveCount++;
     } else {
-      nextResourceState.reviews = "error";
+      nextResourceState.reviews = endpointErrorToStatus(results[5].reason);
+      if (nextResourceState.reviews === "error") backendErrorCount++;
     }
     setCis(nextCis);
     setTimeline(nextTimeline);
@@ -273,11 +332,21 @@ export function CmdbDashboard() {
     setActiveStep(0);
     setPlaying(false);
     setResourceState(nextResourceState);
-    setApiState(liveCount === resourceNames.length ? "live" : liveCount > 0 ? "partial" : runId ? "error" : "demo");
+    // Only escalate to "error" when at least one resource actually failed with a
+    // 5xx or network failure. An all-"unavailable" state (e.g. every resource
+    // returned 400 for a stale run) reads as "demo" rather than API failure.
+    const nextApiState: ApiState = liveCount === resourceNames.length
+      ? "live"
+      : liveCount > 0
+        ? "partial"
+        : backendErrorCount > 0
+          ? "error"
+          : "demo";
+    setApiState(nextApiState);
     setLastSync(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
 
     // Backend run state drives polling lifetime; failures leave it unknown rather than assumed.
-    setRunRecord(runId ? await readRunStatus(runId).catch(() => null) : null);
+    setRunRecord(await readRunStatus(runId).catch(() => null));
   }, []);
 
   /**
@@ -305,7 +374,10 @@ export function CmdbDashboard() {
       setResourceState(current => {
         const next = { ...current };
         resourceNames.forEach((resource, index) => {
-          next[resource] = results[index].status === "fulfilled" ? "live" : "error";
+          const outcome = results[index];
+          next[resource] = outcome.status === "fulfilled"
+            ? "live"
+            : endpointErrorToStatus(outcome.reason);
         });
         return next;
       });
@@ -344,7 +416,7 @@ export function CmdbDashboard() {
       const alreadyRunning = payload.already_running === true || payload.alreadyRunning === true;
       const alreadyCompleted = payload.already_completed === true || payload.alreadyCompleted === true;
       if (!response.ok && !alreadyRunning && !alreadyCompleted) {
-        throw new Error(typeof body.error === "string" ? body.error : `Comprehend start failed (${response.status}).`);
+        throw new Error(extractComprehendError(body, payload, response.status));
       }
       setAnalysisState("started");
       setAnalysisMessage(
@@ -1317,17 +1389,6 @@ function inferConflictCode(message: string): IreActionError["code"] {
   return "IRE_FAILED";
 }
 
-function friendlyIreError(code: string, message: string) {
-  const labels: Record<string, string> = {
-    NOT_CONFIGURED: "Missing ServiceNow IRE configuration.",
-    APPROVAL_REQUIRED: "Execution is blocked until ServiceNow records approval.",
-    STALE_SIMULATION: "Execution was rejected because the approved simulation is stale.",
-    DUPLICATE_EXECUTION: "ServiceNow detected a duplicate idempotency key or prior execution.",
-    VERIFY_MISMATCH: "Verification must use the specific execution correlation ID.",
-    IRE_FAILED: "ServiceNow rejected the IRE action.",
-  };
-  return `${labels[code] ?? message} ${message}`;
-}
 
 function lifecycleTone(state: IreLifecycleState) {
   if (state === "verified") return "good";

@@ -24,6 +24,13 @@ function comprehendUrl() {
   return base ? `${base}/comprehend` : null;
 }
 
+export async function GET() {
+  return Response.json(
+    { error: "Method not allowed", allowed: ["POST"] },
+    { status: 405, headers: { allow: "POST" } },
+  );
+}
+
 export async function POST(request: Request) {
   const incoming = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const runId = typeof incoming.migration_run_id === "string" ? incoming.migration_run_id.trim() : "";

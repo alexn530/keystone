@@ -27,7 +27,8 @@
     "smoke:servicenow-runtime": "node scripts/smoke-servicenow-runtime-helpers.cjs",
     "smoke:servicenow-exporter": "node scripts/smoke-servicenow-exporter.cjs",
     "smoke:mara-observation": "node scripts/smoke-mara-observation.cjs",
-    "smoke:mara-live-state": "node scripts/smoke-mara-live-state.cjs"
+    "smoke:mara-live-state": "node scripts/smoke-mara-live-state.cjs",
+    "smoke:frontend-errors": "node scripts/smoke-frontend-errors.cjs"
   },
   "dependencies": {
     "next": "16.2.6",
