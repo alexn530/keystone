@@ -1490,3 +1490,35 @@ tbody tr:hover .row-arrow { color: var(--lime); transform: translateX(2px); }
   .mara-companion .mara-status-ring,
   .mara-companion .mara-orbit { animation: none !important; transition: none !important; }
 }
+
+/* ---------- Mara: never disappear ---------- */
+
+/* The mascot container is fixed at inline (left, top) with z-index 9000.
+   The rules below block any accidental hiding path from ancestors, and make
+   sure the mascot remains interactive regardless of parent overflow rules. */
+.mara-companion {
+  z-index: 9000 !important;
+  pointer-events: auto;
+  contain: none;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+.mara-companion .mara-toggle {
+  visibility: visible !important;
+  opacity: 1 !important;
+  display: grid !important;
+}
+/* Mute affects only the SVG animation and the halo — never the mascot itself. */
+.mara-companion.mara-muted .mara-toggle,
+.mara-companion.mara-muted .mara-svg { opacity: 1 !important; visibility: visible !important; }
+
+/* Debug overlay */
+.mara-debug {
+  position: absolute; top: 100%; left: 0; margin-top: 6px;
+  padding: 6px 8px; min-width: 160px;
+  color: var(--lime); background: rgba(10, 12, 11, .92);
+  border: 1px solid rgba(199, 243, 77, .35);
+  font: 10px var(--mono); line-height: 1.4; pointer-events: none;
+  z-index: 9001;
+}
+.mara-debug > div { white-space: nowrap; }

@@ -183,7 +183,10 @@ export function MaraCompanion(props: MaraCompanionProps) {
     };
   }, [open, openedAt]);
 
-  const { containerRef, style, onPointerDown, onKeyDown, resetPosition, wasDragged, isMobile } = useDraggableMascot();
+  const { containerRef, style, onPointerDown, onKeyDown, resetPosition, wasDragged, isMobile, debug } = useDraggableMascot();
+  const debugOn = typeof process !== "undefined" && process.env?.NODE_ENV !== "production"
+    && typeof window !== "undefined"
+    && (window.location?.search?.includes("mara-debug=1") ?? false);
 
   const visualState: MaraVisualState = live.visualState;
   const stateSlug = visualState.replace("_", "-");
@@ -282,6 +285,14 @@ export function MaraCompanion(props: MaraCompanionProps) {
       >
         <MaraLotusSvg state={visualState} />
       </button>
+      {debugOn && (
+        <div className="mara-debug" data-mara-no-drag="" aria-hidden="true">
+          <div>x {Math.round(debug.x)} · y {Math.round(debug.y)}</div>
+          <div>vp {debug.viewportWidth}×{debug.viewportHeight}</div>
+          <div>drag {debug.dragging ? "yes" : "no"} · z {debug.zIndex}</div>
+          <div>mounted {debug.mounted ? "yes" : "no"} · state {live.state}</div>
+        </div>
+      )}
     </div>
   );
 }
