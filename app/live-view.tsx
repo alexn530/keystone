@@ -5,7 +5,7 @@ import type { TimelineEvent } from "./cmdb-data";
 import { Icon } from "./icons";
 
 type LiveOpsApiState = "connecting" | "live" | "partial" | "demo" | "error";
-type TimelineResourceStatus = "connecting" | "live" | "error";
+type TimelineResourceStatus = "connecting" | "live" | "unavailable" | "error";
 
 export type LiveOpsViewProps = {
   timeline: TimelineEvent[];

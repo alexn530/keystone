@@ -22,7 +22,8 @@
     "smoke:mara-companion": "node scripts/smoke-mara-companion.cjs",
     "smoke:mara-observation": "node scripts/smoke-mara-observation.cjs",
     "smoke:mara-live-state": "node scripts/smoke-mara-live-state.cjs",
-    "smoke:agent-workspace": "node scripts/smoke-agent-workspace.cjs"
+    "smoke:agent-workspace": "node scripts/smoke-agent-workspace.cjs",
+    "smoke:frontend-errors": "node scripts/smoke-frontend-errors.cjs"
   },
   "dependencies": {
     "next": "16.2.6",
