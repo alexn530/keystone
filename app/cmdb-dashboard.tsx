@@ -8,10 +8,6 @@ import {
   Operation,
   Relationship,
   TimelineEvent,
-  mockCis,
-  mockHealth,
-  mockRelationships,
-  mockTimeline,
 } from "./cmdb-data";
 
 import {
@@ -39,6 +35,7 @@ import {
   type WorkQueueBucket,
   type WorkQueueItem,
   type WorkQueueItemSource,
+  type WorkQueueSummary,
 } from "./lib/cmdb/work-queue";
 
 import { normalizeMaraRun, type MaraRunRecord } from "./lib/cmdb/mara-audit";
@@ -50,6 +47,14 @@ import { AgentHrView } from "./hr-view";
 import { ImportGatewayView, type ImportedRun } from "./import-view";
 import { MaraCompanion } from "./mara-companion";
 import { AgentWorkspaceView } from "./agent-workspace";
+import { deriveWorkspaceViewState } from "./lib/cmdb/workspace-view-state";
+import { PageNavigation } from "./components/PageNavigation";
+import { formatTechnicalSource, parseMaraObservation } from "./lib/cmdb/mara-observation";
+import {
+  externalHrefFor,
+  navigationItems,
+  type NavSectionId,
+} from "./lib/nav/navigation";
 
 type ApiState = "connecting" | "live" | "partial" | "demo" | "error";
 type AnalysisState = "idle" | "starting" | "started" | "error";
@@ -68,7 +73,6 @@ const steps = ["Intake", "Staging", "AI read", "Confidence gate", "IRE", "CMDB",
 const resourceNames: ResourceName[] = ["cis", "timeline", "relationships", "health", "findings", "reviews"];
 const connectingResources: ResourceState = { cis: "connecting", timeline: "connecting", relationships: "connecting", health: "connecting", findings: "connecting", reviews: "connecting" };
 const emptyHealth: HealthData = {
-  ...mockHealth,
   score: 0,
   grade: "—",
   ciCount: 0,
@@ -132,10 +136,10 @@ export function CmdbDashboard() {
   const [section, setSection] = useState<Section>("import");
   const [apiState, setApiState] = useState<ApiState>("connecting");
   const [resourceState, setResourceState] = useState<ResourceState>(connectingResources);
-  const [cis, setCis] = useState(mockCis);
-  const [timeline, setTimeline] = useState(mockTimeline);
-  const [relationships, setRelationships] = useState(mockRelationships);
-  const [health, setHealth] = useState(mockHealth);
+  const [cis, setCis] = useState<ConfigurationItem[]>([]);
+  const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
+  const [relationships, setRelationships] = useState<Relationship[]>([]);
+  const [health, setHealth] = useState<HealthData>(emptyHealth);
   const [findings, setFindings] = useState<RemediationFinding[]>([]);
   const [reviews, setReviews] = useState<RemediationReview[]>([]);
   const [selectedCi, setSelectedCi] = useState<ConfigurationItem | null>(null);
@@ -155,7 +159,13 @@ export function CmdbDashboard() {
   const [activeRunLabel, setActiveRunLabel] = useState("");
   const [runDraft, setRunDraft] = useState("");
   const [livePaused, setLivePaused] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      if (typeof window === "undefined") return false;
+      return window.localStorage.getItem("keystone.sidebar.collapsed") === "1";
+    } catch { return false; }
+  });
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [liveRefreshing, setLiveRefreshing] = useState(false);
   const [liveRefreshCount, setLiveRefreshCount] = useState(0);
   const liveRefreshInFlight = useRef(false);
@@ -163,6 +173,15 @@ export function CmdbDashboard() {
   // the request resolves so rerenders and retries cannot start it twice.
   const comprehendStarted = useRef(new Set<string>());
   const pollInFlight = useRef(false);
+
+  // Persist collapse preference. Ignored if localStorage is blocked.
+  useEffect(() => {
+    try {
+      if (typeof window === "undefined") return;
+      if (sidebarCollapsed) window.localStorage.setItem("keystone.sidebar.collapsed", "1");
+      else window.localStorage.removeItem("keystone.sidebar.collapsed");
+    } catch { /* ignore */ }
+  }, [sidebarCollapsed]);
 
   useEffect(() => {
     const restoredRun = currentRunFromLocation();
@@ -196,10 +215,10 @@ export function CmdbDashboard() {
 
     const results = await Promise.allSettled(resourceNames.map(resource => readEndpoint(resource, runId)));
     const nextResourceState = { ...connectingResources };
-    let nextCis = runId ? [] : mockCis;
-    let nextTimeline = runId ? [] : mockTimeline;
-    let nextRelationships = runId ? [] : mockRelationships;
-    let nextHealth = runId ? emptyHealth : mockHealth;
+    let nextCis: ConfigurationItem[] = [];
+    let nextTimeline: TimelineEvent[] = [];
+    let nextRelationships: Relationship[] = [];
+    let nextHealth: HealthData = emptyHealth;
     let nextFindings: RemediationFinding[] = [];
     let nextReviews: RemediationReview[] = [];
     let liveCount = 0;
@@ -408,6 +427,20 @@ export function CmdbDashboard() {
     return () => window.clearInterval(timer);
   }, [playing, timeline.length]);
 
+  const workspaceView = useMemo(() => deriveWorkspaceViewState({
+    runLabel: activeRunLabel,
+    runId: activeRunId,
+    runState: runRecord?.state ?? "",
+    apiState,
+    analysisState,
+    cis,
+    timeline,
+    relationships,
+    findings,
+    reviews,
+    health,
+  }), [activeRunLabel, activeRunId, runRecord?.state, apiState, analysisState, cis, timeline, relationships, findings, reviews, health]);
+
   const filteredCis = useMemo(() => cis.filter(ci => {
     const matches = `${ci.name} ${ci.className} ${ci.source} ${ci.ip}`.toLowerCase().includes(search.toLowerCase());
     return matches && (filter === "all" || ci.status !== "live");
@@ -473,27 +506,78 @@ export function CmdbDashboard() {
     }
   }
 
-  const nav: { id: Section | "ai-usage"; label: string; detail: string; icon: IconName; href?: string }[] = [
-    { id: "import", label: "Import", detail: "Bring data in", icon: "upload" },
-    { id: "workspace", label: "Agent Workspace", detail: "Watch the run progress", icon: "spark" },
-    { id: "approvals", label: "Approvals", detail: "Authorize governed work", icon: "shield" },
-    { id: "evidence", label: "Evidence", detail: "Inspect durable activity", icon: "clock" },
-    { id: "ai-usage", label: "AI Usage", detail: "Review model activity", icon: "pulse", href: activeRunId ? "/ai-usage?run=" + encodeURIComponent(activeRunId) : "/ai-usage" },
-  ];
+  // Sections that appear in the shared nav config map 1:1 to internal Section
+  // ids except "verify" — the durable-evidence view for this app is the
+  // existing evidence section.
+  const sectionToNavId = (input: Section): NavSectionId | undefined => {
+    if (input === "evidence" || input === "live") return "verify";
+    if (input === "hr") return undefined;
+    return input as NavSectionId;
+  };
+  const navToSection = (input: NavSectionId): Section => (input === "verify" ? "evidence" : input as Section);
+  const currentNavId: NavSectionId = sectionToNavId(section) ?? "workspace";
+  const openNavId = (id: NavSectionId) => {
+    if (id === "ai-usage") {
+      const href = externalHrefFor(id, activeRunId);
+      if (href) window.location.assign(href);
+      return;
+    }
+    setSection(navToSection(id));
+    setMobileNavOpen(false);
+  };
 
-  return <div className={`app-shell${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
-    <aside className="sidebar" aria-hidden={sidebarCollapsed}>
-      <div className="brand"><span className="brand-mark"><span /></span><div><strong>CMDB</strong><small>MODERNIZATION CONTROL</small></div></div>
+  return <div className={"app-shell"
+      + (sidebarCollapsed ? " sidebar-collapsed" : "")
+      + (mobileNavOpen ? " mobile-nav-open" : "")}>
+    {mobileNavOpen && <div className="mobile-nav-backdrop" onClick={() => setMobileNavOpen(false)} aria-hidden="true" />}
+    <aside className="sidebar" aria-label="Primary navigation">
+      <div className="brand">
+        <span className="brand-mark"><span /></span>
+        <div className="brand-copy"><strong>CMDB</strong><small>MODERNIZATION CONTROL</small></div>
+        <button
+          type="button"
+          className="sidebar-collapse"
+          aria-label={sidebarCollapsed ? "Expand navigation" : "Collapse navigation"}
+          aria-expanded={!sidebarCollapsed}
+          title={sidebarCollapsed ? "Expand navigation" : "Collapse navigation"}
+          onClick={() => setSidebarCollapsed(current => !current)}
+        >
+          <Icon name="chevron" size={14} />
+        </button>
+      </div>
       <nav className="main-nav" aria-label="Main navigation">
-        {nav.map(item => item.href
-          ? <a key={item.id} className="nav-link" href={item.href} aria-label={item.label + ": " + item.detail} title={item.label}><span className="nav-icon"><Icon name={item.icon} /></span><span><strong>{item.label}</strong><small>{item.detail}</small></span><Icon name="chevron" size={14} /></a>
-          : <button key={item.id} aria-label={item.label + ": " + item.detail} title={item.label} className={section === item.id ? "active" : ""} onClick={() => setSection(item.id as Section)}>
-              <span className="nav-icon"><Icon name={item.icon} /></span><span><strong>{item.label}</strong><small>{item.detail}</small></span><Icon name="chevron" size={14} />
-            </button>)}
+        {navigationItems.map(item => {
+          const disabled = item.requiresRun && !activeRunId && !item.external;
+          const active = !item.external && item.id === currentNavId;
+          const labelText = item.label + ": " + item.detail;
+          const commonProps = {
+            "aria-label": labelText,
+            title: sidebarCollapsed ? item.label : labelText,
+            className: (active ? "active" : "") + (disabled ? " disabled" : ""),
+          } as const;
+          if (item.external) {
+            const href = externalHrefFor(item.id, activeRunId) ?? "#";
+            return <a key={item.id} className={"nav-link " + commonProps.className} aria-label={commonProps["aria-label"]} title={commonProps.title} href={href} onClick={() => setMobileNavOpen(false)}>
+              <span className="nav-icon"><Icon name={item.icon} /></span>
+              <span className="nav-copy"><strong>{item.label}</strong><small>{item.detail}</small></span>
+              <Icon name="chevron" size={14} />
+            </a>;
+          }
+          return <button
+            key={item.id}
+            {...commonProps}
+            disabled={disabled}
+            onClick={() => openNavId(item.id)}
+          >
+            <span className="nav-icon"><Icon name={item.icon} /></span>
+            <span className="nav-copy"><strong>{item.label}</strong><small>{item.detail}</small></span>
+            <Icon name="chevron" size={14} />
+          </button>;
+        })}
       </nav>
       <div className="sidebar-rule" />
       <div className="governance-card"><span className="shield"><Icon name="shield" size={17} /></span><div><small>GOVERNANCE LOCK</small><strong>IRE is the only write path</strong><p>Every CMDB mutation is reconciled, attributed, and logged.</p></div></div>
-      <div className="sidebar-bottom"><div className={`api-dot ${apiState}`} /><div><strong>{apiState === "live" ? "Live API" : apiState === "partial" ? "Partial API" : apiState === "connecting" ? "Connecting" : apiState === "error" ? "API error" : "Demo snapshot"}</strong><small>Last sync {lastSync}</small></div><button onClick={() => void loadData(activeRunId)} aria-label="Refresh data"><Icon name="refresh" size={16} /></button></div>
+      <div className="sidebar-bottom"><div className={`api-dot ${apiState}`} /><div><strong>{apiState === "live" ? "Live API" : apiState === "partial" ? "Partial API" : apiState === "connecting" ? "Connecting" : apiState === "error" ? "API error" : "Demo snapshot"}</strong><small>Last sync {lastSync}</small></div><button onClick={() => void loadData(activeRunId)} aria-label="Refresh data" title="Refresh data"><Icon name="refresh" size={16} /></button></div>
     </aside>
 
     <main className="main-content">
@@ -502,9 +586,17 @@ export function CmdbDashboard() {
           <button
             type="button"
             className="sidebar-toggle"
-            aria-label={sidebarCollapsed ? "Open navigation" : "Close navigation"}
-            aria-expanded={!sidebarCollapsed}
-            onClick={() => setSidebarCollapsed(current => !current)}
+            aria-label={mobileNavOpen ? "Close navigation" : sidebarCollapsed ? "Expand navigation" : "Collapse navigation"}
+            aria-expanded={mobileNavOpen || !sidebarCollapsed}
+            onClick={() => {
+              // On narrow viewports the topbar button opens the mobile drawer;
+              // on wider viewports it toggles the persistent collapse state.
+              if (typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches) {
+                setMobileNavOpen(current => !current);
+              } else {
+                setSidebarCollapsed(current => !current);
+              }
+            }}
           >
             <Icon name="menu" size={18} />
           </button>
@@ -514,13 +606,19 @@ export function CmdbDashboard() {
       </header>
 
       {section === "import" && <ImportGatewayView onOpenRun={openRun} />}
-      {(section === "workspace" || section === "approvals") && <AgentWorkspaceView runLabel={activeRunLabel} runState={runRecord?.state ?? ""} apiState={apiState} cis={cis} timeline={timeline} relationships={relationships} findings={findings} reviews={reviews} health={health} focus={section === "approvals" ? "approvals" : "overview"} onOpenPhase={phase => setSection(phase)} onOpenRemediation={stagedCiId => { setRemediationTargetId(stagedCiId ?? ""); setSection("remediate"); }} onOpenEvidence={() => setSection("evidence")} onRefresh={() => void loadData(activeRunId)} />}
+      {(section === "workspace" || section === "approvals") && <AgentWorkspaceView runLabel={activeRunLabel} runId={activeRunId} runState={runRecord?.state ?? ""} apiState={apiState} analysisState={analysisState} cis={cis} timeline={timeline} relationships={relationships} findings={findings} reviews={reviews} health={health} focus={section === "approvals" ? "approvals" : "overview"} onOpenPhase={phase => setSection(phase)} onOpenVerify={() => setSection("evidence")} onOpenRemediation={stagedCiId => { setRemediationTargetId(stagedCiId ?? ""); setSection("remediate"); }} onOpenEvidence={() => setSection("evidence")} onRefresh={() => void loadData(activeRunId)} />}
       {section === "evidence" && <LiveOpsView timeline={timeline} activeRunId={activeRunId} apiState={apiState} resourceStatus={resourceState.timeline} paused={livePaused} refreshing={liveRefreshing} refreshCount={liveRefreshCount} onPausedChange={setLivePaused} onRefresh={() => void refreshLiveTimeline()} />}
       {section === "comprehend" && <ComprehendView health={health} timeline={timeline} relationships={relationships} cis={filteredCis} allCis={cis} selectedCi={selectedCi} setSelectedCi={setSelectedCi} search={search} setSearch={setSearch} filter={filter} setFilter={setFilter} playing={playing} activeStep={activeStep} startPlayback={startPlayback} setActiveStep={setActiveStep} apiState={apiState} resourceState={resourceState} activeRunId={activeRunId} runDraft={runDraft} setRunDraft={setRunDraft} loadRun={loadRunFromDraft} clearRun={() => { setRunDraft(""); openRun({ id: "", label: "" }); }} analysisState={analysisState} analysisMessage={analysisMessage} runState={runRecord?.state ?? ""} onStartAnalysis={() => activeRunId && void startComprehend(activeRunId)} />}
       {section === "live" && <LiveOpsView timeline={timeline} activeRunId={activeRunId} apiState={apiState} resourceStatus={resourceState.timeline} paused={livePaused} refreshing={liveRefreshing} refreshCount={liveRefreshCount} onPausedChange={setLivePaused} onRefresh={() => void refreshLiveTimeline()} />}
       {section === "hr" && <AgentHrView timeline={timeline} timelineLive={resourceState.timeline === "live"} cis={resourceState.cis === "live" ? cis : null} activeRunId={activeRunId} />}
       {section === "prioritize" && <PrioritizeView health={health} recalculating={apiState === "connecting"} onRecalculate={() => void loadData(activeRunId)} onFix={(fix) => { setQueuedFix(fix); setActionMessage(""); setSection("remediate"); }} />}
       {section === "remediate" && <RemediateView health={health} cis={cis} timeline={timeline} findings={findings} reviews={reviews} activeRunId={activeRunId} apiState={apiState} queuedFix={queuedFix} initialStagedCiId={remediationTargetId} actionMessage={actionMessage} onSelect={(fix) => { setQueuedFix(fix); setActionMessage(""); }} onSubmit={submitRemediation} />}
+
+      <PageNavigation
+        currentSection={currentNavId}
+        activeRunId={activeRunId}
+        onNavigate={openNavId}
+      />
     </main>
 
     {selectedCi && <ProvenancePanel ci={selectedCi} onClose={() => setSelectedCi(null)} onOpenLedger={openEventLedger} />}
@@ -538,8 +636,11 @@ export function CmdbDashboard() {
       findings={findings}
       reviews={reviews}
       queuedFix={queuedFix}
+      view={workspaceView}
       onNavigate={next => setSection(next)}
       onOpenLedger={openEventLedger}
+      onOpenApprovals={() => setSection("approvals")}
+      onOpenRemediation={() => setSection("remediate")}
       onShowReviewQueue={() => { setFilter("review"); setSection("comprehend"); }}
     />
   </div>;
@@ -904,32 +1005,160 @@ function RemediateView(props: {
       {health.fixes.map((fix, index) => <button className={`tool-card ${selected?.id === fix.id ? "selected" : ""}`} key={fix.id} onClick={() => onSelect(fix)}><span className="tool-icon"><Icon name={index === 0 ? "graph" : index === 1 ? "search" : index === 2 ? "shield" : "clock"} /></span><span className="tool-copy"><small>{fix.tool.toUpperCase()}</small><strong>{fix.title}</strong><span>{fix.affected} candidate records</span></span><span className="tool-impact">+{fix.impact}%</span></button>)}
     </div></div><aside className="proposal-panel panel"><div className="proposal-heading"><span className="eyebrow accent">ACTIVE FINDING</span><span className="draft-pill">SINGLE CI</span></div><h2>{selected?.title}</h2><p>{selected?.description}</p><div className="proposal-summary"><div><span>Candidate records</span><strong>{selected?.affected}</strong></div><div><span>Projected health</span><strong>+{selected?.impact}%</strong></div><div><span>Execution route</span><strong>IRE</strong></div></div>{actionMessage && <div className="action-message"><Icon name="check" size={16} />{actionMessage}</div>}<button className="primary-button full" onClick={() => selected && onSubmit(selected, selectedCi, selectedQueueItem?.finding)}><Icon name="shield" size={16} /> Record proposal</button><small className="no-direct-write">Execution below sends identifiers only. ServiceNow owns payload rebuild, approval, freshness, locks, and verification.</small></aside></section>
     <section className="workbench-layout">
-      <div className="panel staged-workbench">
-        <div className="panel-heading"><div><span className="section-index">03</span><div><h2>IRE lifecycle</h2><p>Browser requests contain only staged record identifiers and correlation metadata.</p></div></div><span className={`lifecycle-pill ${lifecycleTone(lifecycle)}`}>{ireLifecycleLabel(lifecycle)}</span></div>
-        <div className="workbench-body">
-          <div className="staged-queue">
-            {queue.items.map(item => <button key={item.id} className={selectedCi?.id === item.id ? "staged-row selected" : "staged-row"} onClick={() => setSelectedCiId(item.id)}><span className={`ci-icon status-${item.ci.status}`}><Icon name="database" size={14} /></span><span><strong>{item.ci.name}</strong><small>{item.stagedCiId} / {ireLifecycleLabel(item.lifecycle)}</small></span><OperationPill value={item.ci.operation} /></button>)}
-            {!stagedCis.length && <div className="workbench-empty"><Icon name="database" size={22} /><strong>No staged CIs loaded</strong><p>Load an active migration run before using IRE actions.</p></div>}
-          </div>
-          <div className="ire-console">
-            <div className="selected-ci-card"><div><span className="eyebrow accent">SELECTED STAGED CI</span><h3>{selectedCi?.name ?? "No record selected"}</h3><p>{selectedCi ? `${selectedCi.className} / ${selectedCi.source} / ${selectedCi.ip}` : "Choose a staged CI to start simulation."}</p></div><div className="selected-ci-meta"><div><small>RUN</small><strong>{activeRunId ? activeRunId.slice(0, 8) : "none"}</strong></div><div><small>STAGED CI</small><strong>{selectedCi ? (selectedCi.stagedCiId || selectedCi.id).slice(0, 8) : "none"}</strong></div><div><small>CONFIDENCE</small><strong>{selectedCi ? `${Math.round(selectedCi.confidence * 100)}%` : "none"}</strong></div></div></div>
-            {selectedQueueItem && <div className="queue-evidence"><div><span className={`source-dot ${selectedQueueItem.source}`} /><strong>{sourceLabel(selectedQueueItem.source)}</strong><p>{selectedQueueItem.reason}</p></div><div>{selectedQueueItem.evidence.map(item => <code key={item}>{item}</code>)}</div></div>}
-            <div className="ire-action-grid">
-              <button className="primary-button" disabled={!liveRunReady || Boolean(pendingAction)} onClick={() => void runIreAction("simulate")}><Icon name="spark" size={15} /> {pendingAction === "simulate" ? "Simulating..." : "Simulate"}</button>
-              <button className="ghost-button" title="Authorizes one IRE execution for this staged CI and simulation fingerprint." disabled={!liveRunReady || !approvable || Boolean(pendingAction)} onClick={() => approve("approved")}><Icon name="check" size={15} /> {pendingAction === "approve" ? "Saving..." : "Approve once"}</button>
-              <button className="ghost-button danger" disabled={!liveRunReady || !approvable || Boolean(pendingAction)} onClick={() => approve("rejected")}><Icon name="x" size={15} /> Reject</button>
-              <button className="primary-button" title="Advanced recovery control" disabled={!liveRunReady || !approved || rejected || !simulationCorrelation || lifecycle !== "approved_for_execution" || Boolean(pendingAction)} onClick={() => void runIreAction("execute", { simulation_correlation_id: simulationCorrelation ?? "" })}><Icon name="shield" size={15} /> {pendingAction === "execute" ? "Executing..." : "Manual execute"}</button>
-              <button className="ghost-button" disabled={!liveRunReady || !executionCorrelation || lifecycle !== "executed_pending_verification" || Boolean(pendingAction)} onClick={() => void runIreAction("verify", { execution_correlation_id: executionCorrelation ?? "" })}><Icon name="check" size={15} /> {pendingAction === "verify" ? "Verifying..." : "Verify"}</button>
+      <div className="panel staged-queue-panel">
+        <div className="panel-heading compact sticky">
+          <div><span className="section-index">03</span><div><h2>Staged CIs</h2><p>Ordered by lifecycle bucket.</p></div></div>
+          <span className="panel-stat">{stagedCis.length}</span>
+        </div>
+        <div className="staged-queue">
+          {queue.items.map(item => <button key={item.id} className={selectedCi?.id === item.id ? "staged-row selected" : "staged-row"} onClick={() => setSelectedCiId(item.id)}>
+            <span className={`ci-icon status-${item.ci.status}`}><Icon name="database" size={14} /></span>
+            <span><strong>{item.ci.name}</strong><small>{item.stagedCiId} / {ireLifecycleLabel(item.lifecycle)}</small></span>
+            <OperationPill value={item.ci.operation} />
+          </button>)}
+          {!stagedCis.length && <div className="workbench-empty"><Icon name="database" size={22} /><strong>No staged CIs loaded</strong><p>Load an active migration run before using IRE actions.</p></div>}
+        </div>
+      </div>
+
+      <div className="panel ire-console-panel">
+        <div className="panel-heading compact sticky">
+          <div><span className="section-index">04</span><div><h2>IRE lifecycle</h2><p>One staged record at a time.</p></div></div>
+          <span className={`lifecycle-pill ${lifecycleTone(lifecycle)}`}>{ireLifecycleLabel(lifecycle)}</span>
+        </div>
+        <div className="ire-console">
+          <div className="selected-ci-card">
+            <div className="selected-ci-copy">
+              <span className="eyebrow accent">SELECTED STAGED CI</span>
+              <h3>{selectedCi?.name ?? "No record selected"}</h3>
+              <p>{selectedCi ? `${selectedCi.className} · ${selectedCi.source} · ${selectedCi.ip}` : "Choose a staged CI to start simulation."}</p>
             </div>
-            {!liveRunReady && <div className="ire-error"><Icon name="shield" size={15} />Load a live ServiceNow migration run before sending IRE requests. Demo snapshots cannot execute governed actions.</div>}
-            <label className="approval-rationale"><span>APPROVAL RATIONALE</span><textarea value={rationale} onChange={event => setRationale(event.target.value)} /></label>
-            <IreResultPanel workbench={workbench} lifecycle={lifecycle} playback={selectedQueueItem} />
+            <div className="selected-ci-meta">
+              <div><small>RUN</small><strong title={activeRunId}>{activeRunId ? activeRunId.slice(0, 8) : "none"}</strong></div>
+              <div><small>STAGED CI</small><strong title={selectedCi?.stagedCiId || selectedCi?.id}>{selectedCi ? (selectedCi.stagedCiId || selectedCi.id).slice(0, 8) : "none"}</strong></div>
+              <div><small>CONFIDENCE</small><strong>{selectedCi ? `${Math.round(selectedCi.confidence * 100)}%` : "none"}</strong></div>
+            </div>
+          </div>
+
+          <WorkbenchCountsRow queue={queue} lifecycle={lifecycle} />
+
+          {selectedQueueItem && <div className="queue-evidence">
+            <div>
+              <span className={`source-dot ${selectedQueueItem.source}`} />
+              <strong>{sourceLabel(selectedQueueItem.source)}</strong>
+              <p>{selectedQueueItem.reason}</p>
+            </div>
+            <div>{selectedQueueItem.evidence.slice(0, 6).map(item => <code key={item}>{item}</code>)}</div>
+          </div>}
+
+          {!liveRunReady && <div className="ire-error"><Icon name="shield" size={15} />Load a live ServiceNow migration run before sending IRE requests. Demo snapshots cannot execute governed actions.</div>}
+          <label className="approval-rationale"><span>APPROVAL RATIONALE</span><textarea value={rationale} onChange={event => setRationale(event.target.value)} /></label>
+          <IreResultPanel workbench={workbench} lifecycle={lifecycle} playback={selectedQueueItem} />
+        </div>
+        <div className="ire-action-footer">
+          <div className="ire-action-grid">
+            <button className="primary-button" disabled={!liveRunReady || Boolean(pendingAction)} onClick={() => void runIreAction("simulate")}><Icon name="spark" size={15} /> {pendingAction === "simulate" ? "Simulating…" : "Simulate"}</button>
+            <button className="ghost-button" title="Authorizes one IRE execution for this staged CI and simulation fingerprint." disabled={!liveRunReady || !approvable || Boolean(pendingAction)} onClick={() => approve("approved")}><Icon name="check" size={15} /> {pendingAction === "approve" ? "Saving…" : "Approve"}</button>
+            <button className="ghost-button danger" disabled={!liveRunReady || !approvable || Boolean(pendingAction)} onClick={() => approve("rejected")}><Icon name="x" size={15} /> Reject</button>
+            <button className="primary-button" title="Advanced recovery control" disabled={!liveRunReady || !approved || rejected || !simulationCorrelation || lifecycle !== "approved_for_execution" || Boolean(pendingAction)} onClick={() => void runIreAction("execute", { simulation_correlation_id: simulationCorrelation ?? "" })}><Icon name="shield" size={15} /> {pendingAction === "execute" ? "Executing…" : "Execute"}</button>
+            <button className="ghost-button" disabled={!liveRunReady || !executionCorrelation || lifecycle !== "executed_pending_verification" || Boolean(pendingAction)} onClick={() => void runIreAction("verify", { execution_correlation_id: executionCorrelation ?? "" })}><Icon name="check" size={15} /> {pendingAction === "verify" ? "Verifying…" : "Verify"}</button>
           </div>
         </div>
       </div>
-      <aside className="panel activity-panel"><div className="panel-heading compact"><div><span className="section-index">04</span><div><h2>Lifecycle activity</h2><p>Derived from action results and Event Ledger playback.</p></div></div></div><div className="activity-feed">{activityRows(workbench, selectedActivity).map(row => <article key={row.id} className={row.tone}><small>{row.label}</small><strong>{row.title}</strong><p>{row.detail}</p></article>)}</div></aside>
+
+      <aside className="panel activity-panel">
+        <div className="panel-heading compact sticky">
+          <div><span className="section-index">05</span><div><h2>Lifecycle activity</h2><p>Derived from action results and Event Ledger playback.</p></div></div>
+        </div>
+        <div className="activity-feed">
+          {activityRows(workbench, selectedActivity).map(row => <ActivityFeedRow key={row.id} row={row} />)}
+        </div>
+      </aside>
     </section>
   </div>;
+}
+
+function WorkbenchCountsRow({ queue, lifecycle }: { queue: WorkQueueSummary; lifecycle: IreLifecycleState }) {
+  const counts = {
+    ready: queue.items.filter(item => item.bucket === "ready_to_simulate").length,
+    approval: queue.items.filter(item => item.bucket === "needs_approval").length,
+    verify: queue.items.filter(item => item.bucket === "needs_verification").length,
+    verified: queue.items.filter(item => item.bucket === "verified").length,
+    blocked: queue.items.filter(item => item.bucket === "blocked" || item.bucket === "simulation_failed").length,
+  };
+  return <div className="workbench-counts">
+    <div><small>READY</small><strong>{counts.ready}</strong></div>
+    <div><small>APPROVAL</small><strong>{counts.approval}</strong></div>
+    <div><small>VERIFY</small><strong>{counts.verify}</strong></div>
+    <div><small>VERIFIED</small><strong>{counts.verified}</strong></div>
+    <div><small>BLOCKED</small><strong>{counts.blocked}</strong></div>
+    <div className="workbench-counts-latest"><small>LATEST</small><strong>{ireLifecycleLabel(lifecycle)}</strong></div>
+  </div>;
+}
+
+function ActivityFeedRow({ row }: { row: ActivityRow }) {
+  const isMara = /mara/i.test(row.actor || "");
+  if (isMara) return <MaraObservationBubble row={row} />;
+
+  // Non-Mara agents: never render raw JSON in the card body. If the detail
+  // looks structured, show a stock line and hide the source in Technical
+  // evidence.
+  const detail = row.detail || "";
+  const looksStructured = /^\s*[{[]|Observation\s*:/i.test(detail);
+  const readable = looksStructured
+    ? "Structured evidence recorded. Open technical evidence to inspect the source data."
+    : (detail.replace(/\s+/g, " ").trim() || "—");
+  return <article className={row.tone}>
+    <small>{row.label}{row.actor ? ` · ${row.actor}` : ""}</small>
+    <strong>{row.title}</strong>
+    <p>{readable}</p>
+    {looksStructured && <details className="activity-technical">
+      <summary>Technical evidence</summary>
+      <pre>{formatTechnicalSource(detail)}</pre>
+    </details>}
+  </article>;
+}
+
+function MaraObservationBubble({ row }: { row: ActivityRow }) {
+  const [showAll, setShowAll] = useState(false);
+  const observation = parseMaraObservation(row.detail || "");
+  const previewCount = 3;
+  const shownRecords = showAll ? observation.records : observation.records.slice(0, previewCount);
+  const moreCount = Math.max(0, observation.records.length - shownRecords.length);
+
+  return <article className={"mara-observation " + row.tone}>
+    <div className="mara-observation-top">
+      <span className="mara-observation-avatar" aria-hidden="true">M</span>
+      <div className="mara-observation-header">
+        <small>{row.label} · Mara</small>
+        <strong>{row.title}</strong>
+      </div>
+    </div>
+    <div className="mara-observation-bubble">
+      <p>{observation.summaryText}</p>
+      {observation.chips.length > 0 && <ul className="mara-observation-chips">
+        {observation.chips.map(chip => <li key={chip}>{chip}</li>)}
+      </ul>}
+    </div>
+    {shownRecords.length > 0 && <ul className="mara-observation-records">
+      {shownRecords.map((record, index) => <li key={record.id ?? index}>
+        <strong>{[record.id, record.name].filter(Boolean).join(" · ") || "record"}</strong>
+        <span>
+          {record.proposedClass ? record.proposedClass : ""}
+          {record.confidence !== undefined ? ` · ${record.confidence}%` : ""}
+          {record.status ? ` · ${record.status}` : ""}
+        </span>
+      </li>)}
+      {moreCount > 0 && <li>
+        <button type="button" className="mara-observation-more" onClick={() => setShowAll(true)}>
+          +{moreCount} more record{moreCount === 1 ? "" : "s"}
+        </button>
+      </li>}
+    </ul>}
+    <details className="activity-technical">
+      <summary>Technical evidence</summary>
+      <pre>{observation.technicalRaw}</pre>
+    </details>
+  </article>;
 }
 
 function WorkQueueBucketCard({ bucket, selectedId, onSelect }: { bucket: WorkQueueBucket; selectedId?: string; onSelect: (id: string) => void }) {
@@ -973,8 +1202,13 @@ function IreResultPanel({ workbench, lifecycle, playback }: { workbench: IreWork
   const latestErrorDetails = ireErrorDetails(latestError?.details);
   const targetCi = workbench.execution?.target_ci;
   const targetLabel = targetCi?.display_value ?? playback?.targetCiName ?? shortId(targetCi?.sys_id ?? playback?.targetCiSysId);
+  const evidenceItems = humanizeStringList(workbench.simulation?.evidence);
+  const errorItems = humanizeStringList(latestErrorDetails);
+  const summarySource = workbench.verification?.verification_summary ?? (lifecycle === "verification_failed" ? playback?.reason : undefined);
+  const summary = summarySource ? humanizeText(summarySource) : undefined;
+  const errorMessage = latestError ? humanizeText(latestError.message) : undefined;
   return <div className="ire-results">
-    {latestError && <div className="ire-error"><Icon name="x" size={15} />{friendlyIreError(latestError.code, latestError.message)}</div>}
+    {latestError && <div className="ire-error"><Icon name="x" size={15} />{friendlyIreError(latestError.code, errorMessage?.readable ?? latestError.message)}</div>}
     <div className="ire-result-grid">
       <ResultMetric label="State" value={ireLifecycleLabel(lifecycle)} />
       <ResultMetric label="Simulation" value={workbench.simulation?.status ?? (playback?.simulationCorrelation ? "recorded" : "not run")} />
@@ -988,10 +1222,66 @@ function IreResultPanel({ workbench, lifecycle, playback }: { workbench: IreWork
       <code>execution {shortId(workbench.execution?.success ? workbench.execution.execution_correlation_id : playback?.executionCorrelation)}</code>
       <code>target {targetLabel}</code>
     </div>
-    {workbench.simulation?.evidence?.length ? <ul className="ire-evidence">{workbench.simulation.evidence.map(item => <li key={item}>{item}</li>)}</ul> : null}
-    {latestErrorDetails.length ? <ul className="ire-evidence error-details">{latestErrorDetails.map(item => <li key={item}>{item}</li>)}</ul> : null}
-    {(workbench.verification?.verification_summary || (lifecycle === "verification_failed" ? playback?.reason : undefined)) && <p className="verification-summary">{workbench.verification?.verification_summary ?? playback?.reason}</p>}
+    {evidenceItems.readable.length > 0 && <ul className="ire-evidence">
+      {evidenceItems.readable.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}
+    </ul>}
+    {errorItems.readable.length > 0 && <ul className="ire-evidence error-details">
+      {errorItems.readable.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}
+    </ul>}
+    {summary && <p className="verification-summary">{summary.readable}</p>}
+    {(evidenceItems.raw || errorItems.raw || summary?.raw || (errorMessage && errorMessage.raw)) && <details className="activity-technical ire-technical">
+      <summary>Technical evidence</summary>
+      <pre>{[
+        evidenceItems.raw && `evidence:\n${evidenceItems.raw}`,
+        errorItems.raw && `error details:\n${errorItems.raw}`,
+        errorMessage?.raw && `error message:\n${errorMessage.raw}`,
+        summary?.raw && `summary:\n${summary.raw}`,
+      ].filter(Boolean).join("\n\n")}</pre>
+    </details>}
   </div>;
+}
+
+function humanizeText(value: string): { readable: string; raw?: string } {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) return { readable: "—" };
+  if (looksStructuredPayload(trimmed)) {
+    return {
+      readable: "Structured payload received. Open technical evidence to inspect the source data.",
+      raw: prettifyPayload(trimmed),
+    };
+  }
+  return { readable: trimmed.replace(/\s+/g, " ") };
+}
+
+function humanizeStringList(values?: string[]): { readable: string[]; raw?: string } {
+  if (!values?.length) return { readable: [] };
+  const readable: string[] = [];
+  const rawParts: string[] = [];
+  for (const value of values) {
+    const trimmed = (value ?? "").toString().trim();
+    if (!trimmed) continue;
+    if (looksStructuredPayload(trimmed)) {
+      rawParts.push(prettifyPayload(trimmed));
+    } else {
+      readable.push(trimmed.replace(/\s+/g, " "));
+    }
+  }
+  if (readable.length === 0 && rawParts.length > 0) {
+    readable.push("Structured payload received. Open technical evidence to inspect the source data.");
+  }
+  return { readable, raw: rawParts.length ? rawParts.join("\n") : undefined };
+}
+
+function looksStructuredPayload(value: string): boolean {
+  return /^\s*[{[]/.test(value) || value.length > 240;
+}
+
+function prettifyPayload(value: string): string {
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2);
+  } catch {
+    return value;
+  }
 }
 
 function ResultMetric({ label, value }: { label: string; value: string | undefined }) {
@@ -1051,14 +1341,16 @@ function shortId(value?: string) {
   return value.length > 18 ? `${value.slice(0, 8)}...${value.slice(-6)}` : value;
 }
 
-function activityRows(workbench: IreWorkbenchRecord, events: TimelineEvent[]) {
-  const rows = [
-    workbench.simulation && { id: "simulation", label: "SIMULATION", title: workbench.simulation.success ? "Simulation recorded" : "Simulation failed", detail: workbench.simulation.error?.message ?? workbench.simulation.evidence?.[0] ?? "ServiceNow returned simulation metadata.", tone: workbench.simulation.success ? "complete" : "error" },
-    workbench.approval && { id: "approval", label: "APPROVAL", title: `${workbench.approval.status ?? "decision"} recorded`, detail: workbench.approval.error?.message ?? "Review decision was submitted for the single actionable finding.", tone: workbench.approval.success ? "review" : "error" },
-    workbench.execution && { id: "execution", label: "EXECUTION", title: workbench.execution.success ? "Execution accepted" : "Execution rejected", detail: workbench.execution.error?.message ?? "ServiceNow rebuilt and handled the IRE execution request.", tone: workbench.execution.success ? "complete" : "error" },
-    workbench.verification && { id: "verification", label: "VERIFY", title: workbench.verification.success ? "Verification complete" : "Verification failed", detail: workbench.verification.error?.message ?? workbench.verification.verification_summary ?? "Read-back was tied to the execution correlation ID.", tone: workbench.verification.success ? "complete" : "error" },
-  ].filter(Boolean) as { id: string; label: string; title: string; detail: string; tone: string }[];
-  const ledgerRows = events.map(event => ({ id: event.id, label: `LEDGER ${event.seq}`, title: event.name, detail: event.reasoning, tone: event.status }));
+type ActivityRow = { id: string; label: string; title: string; detail: string; tone: string; actor?: string };
+
+function activityRows(workbench: IreWorkbenchRecord, events: TimelineEvent[]): ActivityRow[] {
+  const rows: ActivityRow[] = [
+    workbench.simulation && { id: "simulation", label: "SIMULATION", title: workbench.simulation.success ? "Simulation recorded" : "Simulation failed", detail: workbench.simulation.error?.message ?? workbench.simulation.evidence?.[0] ?? "ServiceNow returned simulation metadata.", tone: workbench.simulation.success ? "complete" : "error", actor: "IRE" },
+    workbench.approval && { id: "approval", label: "APPROVAL", title: `${workbench.approval.status ?? "decision"} recorded`, detail: workbench.approval.error?.message ?? "Review decision was submitted for the single actionable finding.", tone: workbench.approval.success ? "review" : "error", actor: "Reviewer" },
+    workbench.execution && { id: "execution", label: "EXECUTION", title: workbench.execution.success ? "Execution accepted" : "Execution rejected", detail: workbench.execution.error?.message ?? "ServiceNow rebuilt and handled the IRE execution request.", tone: workbench.execution.success ? "complete" : "error", actor: "IRE" },
+    workbench.verification && { id: "verification", label: "VERIFY", title: workbench.verification.success ? "Verification complete" : "Verification failed", detail: workbench.verification.error?.message ?? workbench.verification.verification_summary ?? "Read-back was tied to the execution correlation ID.", tone: workbench.verification.success ? "complete" : "error", actor: "IRE" },
+  ].filter(Boolean) as ActivityRow[];
+  const ledgerRows: ActivityRow[] = events.map(event => ({ id: event.id, label: `LEDGER ${event.seq}`, title: event.name, detail: event.reasoning, tone: event.status, actor: event.source }));
   return [...rows, ...ledgerRows].slice(-7).reverse();
 }
 
