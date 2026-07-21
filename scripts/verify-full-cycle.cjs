@@ -26,6 +26,11 @@ const { chromium } = require("@playwright/test");
 
 const BASE = process.env.KEYSTONE_URL || "http://localhost:3000";
 const SECTION_WAIT_MS = 4000;
+// Optional: point at a known-populated run instead of minting a fresh one.
+// docs/lifecycle-acceptance-report.md pins e0ac4df3... — 2 CIs, findings,
+// reviews, timeline. Set KEYSTONE_RUN_ID to override.
+const KNOWN_POPULATED_RUN = "e0ac4df32b82871060aefba6b891bf5b";
+const RUN_ID_OVERRIDE = process.env.KEYSTONE_RUN_ID;
 
 async function importRun() {
   const response = await fetch(`${BASE}/api/cmdb/import`, {
@@ -42,6 +47,33 @@ async function importRun() {
   return runId;
 }
 
+async function resolveRunId() {
+  if (RUN_ID_OVERRIDE) {
+    if (!/^[0-9a-f]{32}$/i.test(RUN_ID_OVERRIDE)) {
+      throw new Error(`KEYSTONE_RUN_ID must be a 32-hex sys_id (got ${RUN_ID_OVERRIDE}).`);
+    }
+    console.log(`[Run] using KEYSTONE_RUN_ID override ${RUN_ID_OVERRIDE.slice(0, 8)}…`);
+    return { runId: RUN_ID_OVERRIDE, source: "override" };
+  }
+  // Prefer the known-populated run pinned in docs/lifecycle-acceptance-report.md
+  // so we can exercise the CI panel with real staged CIs. Fall back to a
+  // fresh import if that run is no longer live.
+  try {
+    const probe = await fetch(`${BASE}/api/cmdb/cis?run=${KNOWN_POPULATED_RUN}`, { cache: "no-store" });
+    if (probe.ok) {
+      const body = await probe.json();
+      const cis = body?.result?.result || body?.result || [];
+      if (Array.isArray(cis) && cis.length > 0) {
+        console.log(`[Run] using known-populated run ${KNOWN_POPULATED_RUN.slice(0, 8)}… (${cis.length} CIs)`);
+        return { runId: KNOWN_POPULATED_RUN, source: "known-populated" };
+      }
+    }
+  } catch { /* fall through */ }
+  const fresh = await importRun();
+  console.log(`[Run] fresh import ${fresh.slice(0, 8)}…`);
+  return { runId: fresh, source: "fresh-import" };
+}
+
 /** Return a short trimmed transcript of visible text on the page (for the report). */
 async function readVisibleSnapshot(page) {
   const raw = await page.evaluate(() => {
@@ -56,9 +88,9 @@ async function readVisibleSnapshot(page) {
   console.log(`Full-cycle verify against ${BASE}`);
   console.log("=".repeat(70));
 
-  // 1. Import → real run
-  const runId = await importRun();
-  console.log(`\n[Import] created run ${runId.slice(0, 8)}… (32-hex sys_id)`);
+  // 1. Resolve a run — prefer the known-populated one so the CI panel gets exercised
+  const { runId, source } = await resolveRunId();
+  console.log(`[Run] source=${source}  id=${runId}`);
 
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext();
