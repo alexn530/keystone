@@ -138,6 +138,37 @@ targets: `388d7b64e0d20b501135ca100a1c0a0e`,
 `ab7db7643cd20b5086b23c13099755ba`, and
 `277db764b1d20b5021e447f8414017ab`.
 
+### Milestone 7 failure-loop acceptance repair
+
+The first controlled live failure-loop run, `DMR0001064`
+(`cdcdc8bc93d60b50410e383efaba105c`), staged exactly two records and performed
+no approval, Execute, Verify, or CMDB write. It exposed two cross-layer defects:
+Comprehend held the known `linux srv` alias at confidence 0 before IRE strategy
+selection, while the identity-empty record reached IRE and collapsed to generic
+`IRE_SIMULATION_FAILED`. The campaign endpoint consequently returned one
+`unknown` blocked group and no retry-eligible alias group.
+
+The repository repair makes known aliases an evidence-bound two-step protocol:
+the first call persists `CLASS_ALIAS_RETRY_AVAILABLE`, an exact idempotency
+replay remains blocked, and only a later server-generated retry key may consume
+`normalize_known_class_alias` / `class-alias-v1`. A payload preflight now emits
+`MISSING_IDENTITY` before confidence or IRE identification and does not count a
+staging source identifier as CMDB identity. Live acceptance was rerun after
+the updated payload and simulation Script Includes were deployed.
+
+The post-deployment rerun passed on the same two-record run. Event Ledger
+sequence 44 persisted `CLASS_ALIAS_RETRY_AVAILABLE` for staged CI
+`c1cdccbc93d60b50410e383efaba10b2`; an exact idempotency replay returned the
+same blocker without creating another ledger event. Sequence 45 persisted
+`MISSING_IDENTITY` for staged CI `09cdccbc93d60b50410e383efaba10b3`.
+Campaign `2FDDC906DE059210B4F13701` then consumed exactly one sequential alias
+retry. Sequences 46–47 recorded simulation start and completion with
+`normalize_known_class_alias`, mapping `class-alias-v1`, `retry_count=1`,
+operation `INSERT`, and canonical fingerprint
+`02C56D74BE1C7EDFEDB527BE33C316A31A2F6FD9CB4EACD8288D73DF9D547A9C`.
+The missing-identity record remained isolated in a blocked group. No approval,
+Execute, Verify, or CMDB write was performed.
+
 ## CPR End-to-End Handoff Repair
 
 A GET-only trace of stress run `065821a42b1e835060aefba6b891bf53`

@@ -5,6 +5,7 @@ DotwalkersIrePayloadService.prototype = {
         this.TEAM = 'THE_DOTWALKERS';
         this.RUN_TABLE = 'x_kest_dotwalkers_migration_run';
         this.CI_TABLE = 'x_kest_dotwalkers_staged_ci_record';
+        this.FINDING_TABLE = 'x_kest_dotwalkers_finding';
         this.LEDGER_TABLE = 'x_kest_dotwalkers_event_ledger';
         this.MIN_CONFIDENCE = parseInt(
             gs.getProperty(
@@ -38,6 +39,11 @@ DotwalkersIrePayloadService.prototype = {
             'os',
             'os_version'
         ];
+
+        this.IDENTITY_FIELDS = [
+            'name', 'host_name', 'fqdn', 'ip_address',
+            'mac_address', 'serial_number', 'asset_tag'
+        ];
     },
 
     /**
@@ -52,6 +58,7 @@ DotwalkersIrePayloadService.prototype = {
         var staged = this._loadStagedCi(runId, stagedCiId);
 
         this._validateRun(run);
+        this._validateStagedIdentity(staged);
         this._validateCandidate(staged);
 
         var proposedClass = this._text(staged.getValue('proposed_class'));
@@ -76,12 +83,12 @@ DotwalkersIrePayloadService.prototype = {
         var staged = this._loadStagedCi(runId, stagedCiId);
 
         this._validateRun(run);
-        this._validateCandidate(staged);
-
         var proposedClass = this._text(staged.getValue('proposed_class'));
 
         // If the persisted class is already allowlisted, use normal path
         if (this.ALLOWED_CLASSES[proposedClass]) {
+            this._validateStagedIdentity(staged);
+            this._validateCandidate(staged);
             return this._buildAuthoritativeBundle(run, staged, proposedClass, null);
         }
 
@@ -100,6 +107,25 @@ DotwalkersIrePayloadService.prototype = {
                 : 'UNSUPPORTED_CLASS_ALIAS';
             throw strategyError;
         }
+
+        this._validateStagedIdentity(staged);
+
+        /*
+         * A known alias is deliberately a two-step, evidence-bound flow.
+         * The first call persists CLASS_ALIAS_RETRY_AVAILABLE. A later call
+         * with a different idempotency key may consume the one deterministic
+         * retry. This keeps ordinary Simulate distinct from Retry without
+         * accepting a browser-owned strategy or mapping.
+         */
+        if (!this._hasAliasRetryAvailable(runId, stagedCiId)) {
+            var retryAvailable = new Error(
+                'Known class alias requires the bounded deterministic retry.'
+            );
+            retryAvailable.error_code = 'CLASS_ALIAS_RETRY_AVAILABLE';
+            throw retryAvailable;
+        }
+
+        this._validateAliasRetryCandidate(runId, stagedCiId, staged);
 
         // Validate with reconstruct()
         var reconstructed = strategySvc.reconstruct(decision);
@@ -125,7 +151,6 @@ DotwalkersIrePayloadService.prototype = {
         var staged = this._loadStagedCi(runId, stagedCiId);
 
         this._validateRun(run);
-        this._validateCandidate(staged);
 
         if (!strategyEvidence || typeof strategyEvidence !== 'object') {
             throw new Error('Structured strategy evidence is required for buildFromPersistedStrategy');
@@ -144,6 +169,8 @@ DotwalkersIrePayloadService.prototype = {
         var reconstructed = this._validateStrategyEvidence(strategyEvidence);
         var effectiveClass = reconstructed.target_class;
 
+        this._validateStagedIdentity(staged);
+        this._validateAliasRetryCandidate(runId, stagedCiId, staged);
         this._validateClass(effectiveClass);
 
         return this._buildAuthoritativeBundle(run, staged, effectiveClass, reconstructed);
@@ -161,6 +188,8 @@ DotwalkersIrePayloadService.prototype = {
         var payload = this._parseObject(
             staged.getValue('payload')
         );
+
+        this._validateUsableIdentity(payload);
 
         var target = new GlideRecord(effectiveClass);
         var values = {};
@@ -520,6 +549,76 @@ DotwalkersIrePayloadService.prototype = {
             confidenceError.error_code = 'CANDIDATE_REJECTED';
             throw confidenceError;
         }
+    },
+
+    _validateAliasRetryCandidate: function(runId, stagedCiId, staged) {
+        var status = this._text(staged.getValue('identification_status'));
+        if (status === 'rejected') {
+            var rejected = new Error('Rejected staged CI cannot use an alias retry.');
+            rejected.error_code = 'CANDIDATE_REJECTED';
+            throw rejected;
+        }
+
+        var findings = new GlideRecord(this.FINDING_TABLE);
+        findings.addQuery('migration_run', runId);
+        findings.addQuery('staged_ci', stagedCiId);
+        findings.addQuery('team_prefix', this.TEAM);
+        findings.query();
+        while (findings.next()) {
+            var type = this._text(findings.getValue('type')).toLowerCase();
+            var severity = this._text(findings.getValue('severity')).toLowerCase();
+            if (type.indexOf('duplicate') >= 0 ||
+                (severity === 'critical' && type !== 'class_mismatch')) {
+                var blocked = new Error('A non-alias finding blocks deterministic retry.');
+                blocked.error_code = 'CANDIDATE_REJECTED';
+                throw blocked;
+            }
+        }
+    },
+
+    _validateUsableIdentity: function(payload) {
+        for (var index = 0; index < this.IDENTITY_FIELDS.length; index++) {
+            if (this._text(payload[this.IDENTITY_FIELDS[index]])) {
+                return;
+            }
+        }
+
+        var identityError = new Error(
+            'No usable CMDB identity exists in the staged payload.'
+        );
+        identityError.error_code = 'MISSING_IDENTITY';
+        throw identityError;
+    },
+
+    _validateStagedIdentity: function(staged) {
+        this._validateUsableIdentity(
+            this._parseObject(staged.getValue('payload'))
+        );
+    },
+
+    _hasAliasRetryAvailable: function(runId, stagedCiId) {
+        var ledger = new GlideRecord(this.LEDGER_TABLE);
+        ledger.addQuery('migration_run', runId);
+        ledger.addQuery('team_prefix', this.TEAM);
+        ledger.addQuery('event_type', 'error');
+        ledger.query();
+
+        while (ledger.next()) {
+            var parsed = null;
+            try {
+                parsed = JSON.parse(String(ledger.getValue('detail') || ''));
+            } catch (ignoredParseError) {
+                continue;
+            }
+            if (parsed &&
+                this._text(parsed.action) === 'ire_simulation_blocked' &&
+                this._text(parsed.migration_run_id) === runId &&
+                this._text(parsed.staged_ci_id) === stagedCiId &&
+                this._text(parsed.error_code) === 'CLASS_ALIAS_RETRY_AVAILABLE') {
+                return true;
+            }
+        }
+        return false;
     },
 
     _validateClass: function(className) {

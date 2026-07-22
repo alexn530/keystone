@@ -560,6 +560,10 @@ DotwalkersPhaseATests.prototype = {
         var svc = new DotwalkersIrePayloadService();
         this._assert(typeof svc.build === 'function', 'build method must exist');
         this._assert(typeof svc._buildAuthoritativeBundle === 'function', '_buildAuthoritativeBundle must exist');
+        this._assertThrows(function() {
+            svc._validateUsableIdentity({});
+        }, 'No usable CMDB identity');
+        svc._validateUsableIdentity({ host_name: 'identity-present.example.test' });
     },
 
     /* ===== Test: buildWithStrategy method exists ===== */
@@ -687,6 +691,7 @@ DotwalkersPhaseATests.prototype = {
                     if (field === 'proposed_class') return 'linux srv';
                     if (field === 'identification_status') return 'pending';
                     if (field === 'confidence') return '85';
+                    if (field === 'payload') return '{"name":"retry-alias-01"}';
                     return '';
                 }
             };
@@ -694,6 +699,36 @@ DotwalkersPhaseATests.prototype = {
 
         svc._validateRun = function() {};
         svc._validateCandidate = function() {};
+        svc._validateAliasRetryCandidate = function() {};
+        svc._validateClass = function() {};
+        svc._countPriorRetries = function() { return 0; };
+        svc._hasAliasRetryAvailable = function() { return false; };
+
+        var firstError = null;
+        try {
+            svc.buildWithStrategy(
+                'aaaabbbbccccddddeeeeffffaaaabbbb',
+                '11112222333344445555666677778888'
+            );
+        } catch (error) {
+            firstError = error;
+        }
+        this._assert(firstError && firstError.error_code === 'CLASS_ALIAS_RETRY_AVAILABLE',
+            'First known-alias call must require persisted bounded-retry evidence');
+
+        svc._hasAliasRetryAvailable = function() { return true; };
+        svc._buildAuthoritativeBundle = function(run, staged, effectiveClass, evidence) {
+            return { proposed_class: effectiveClass, strategy_evidence: evidence };
+        };
+        var retry = svc.buildWithStrategy(
+            'aaaabbbbccccddddeeeeffffaaaabbbb',
+            '11112222333344445555666677778888'
+        );
+        this._assertEqual('cmdb_ci_linux_server', retry.proposed_class,
+            'Persisted blocker unlocks the allowlisted class mapping');
+        this._assertEqual(1, retry.strategy_evidence.retry_count,
+            'The selected mapping consumes exactly one retry');
+
         svc._countPriorRetries = function() { return 1; };
 
         this._assertThrows(function() {

@@ -24,6 +24,16 @@ require.extensions[".ts"] = function loadTypeScript(module, filename) {
 
 const campaign = require("../app/lib/cmdb/remediation-campaign.ts");
 const recovery = require("../app/lib/cmdb/remediation-campaign-recovery.ts");
+
+assert.equal(
+  campaign.parseCampaignEventDetail(JSON.stringify({
+    action: "ire_simulation_blocked",
+    staged_ci_id: "a".repeat(32),
+    error_code: "MISSING_IDENTITY",
+  }))?.error_code,
+  "MISSING_IDENTITY",
+  "structured simulation blockers must remain campaign lifecycle evidence",
+);
 const { normalizeComprehendTimeline } = require("../app/lib/cmdb/comprehend-adapter.ts");
 
 async function main() {
@@ -128,8 +138,8 @@ const failureFindings = [
   { id: sysId(53), number: "DWF53", stagedCiId: missingIdentityCi.id, type: "identity", severity: "critical", recommendation: "Missing serial_number and FQDN; no identifier is available." },
 ];
 const failureTimeline = [
-  failureEvent(aliasCi, 1, "INVALID_CLASS", "Invalid proposed class Linux Srv", 0),
-  failureEvent(missingIdentityCi, 2, "MISSING_IDENTIFIER", "Missing serial_number and FQDN; no identifier is available", 0),
+  failureEvent(aliasCi, 1, "CLASS_ALIAS_RETRY_AVAILABLE", "Known class alias is eligible for one deterministic retry", 0),
+  failureEvent(missingIdentityCi, 2, "MISSING_IDENTITY", "Staged CI has no usable CMDB identity", 0),
 ];
 const failureSnapshot = { ...base, cis: [aliasCi, missingIdentityCi], timeline: failureTimeline, findings: failureFindings };
 const failureGroups = campaign.remediationFailureGroups(failureSnapshot);
@@ -140,6 +150,8 @@ assert.equal(retryGroup.state, "eligible");
 assert.equal(retryGroup.strategy_id, campaign.CAMPAIGN_RETRY_STRATEGY_ID);
 assert.equal(retryGroup.mapping_version, campaign.CAMPAIGN_RETRY_MAPPING_VERSION);
 assert.equal(blockedGroup.state, "blocked");
+assert.equal(retryGroup.items[0].error_code, "CLASS_ALIAS_RETRY_AVAILABLE");
+assert.equal(blockedGroup.items[0].error_code, "MISSING_IDENTITY");
 assert.match(blockedGroup.blocker, /identity evidence/i);
 const retryPlan = campaign.planRemediationCampaign(failureSnapshot, retryGroup.work_group_signature, 20);
 let retryCalls = 0;
@@ -162,7 +174,7 @@ assert.equal(retryCalls, 1, "retry groups execute sequentially and only for elig
 assert.equal(retryResult.summary.succeeded, 1);
 assert.equal(retryResult.items[0].retry_count, 1);
 const exhaustedSnapshot = { ...failureSnapshot, timeline: [
-  failureEvent(aliasCi, 3, "INVALID_CLASS", "Alias retry failed", 1),
+  failureEvent(aliasCi, 3, "RETRY_LIMIT_REACHED", "Alias retry failed", 1),
   failureTimeline[1],
 ] };
 const exhausted = campaign.remediationFailureGroups(exhaustedSnapshot).groups.find(group => group.category === "class_alias");
@@ -417,6 +429,7 @@ assert.match(route, /"source_identifier"/);
 assert.match(route, /"policy_version"/);
 assert.match(route, /invokeCampaignProposal/);
 assert.match(route, /"failure-groups"/);
+assert.match(route, /\[a-zA-Z0-9:._ -\]\*/, "campaign route must round-trip server-generated signatures containing class-label spaces");
 assert.match(route, /retryRemediationCampaign/);
 assert.match(route, /loadCampaignSnapshot\(selection\.migration_run_id\)/, "proposal preparation reloads authoritative ServiceNow evidence");
 assert.equal(/operation: item\.operation/.test(route), false, "campaign route never forwards a browser operation");

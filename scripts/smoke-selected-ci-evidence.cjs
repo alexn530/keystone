@@ -336,6 +336,15 @@ function event(overrides) {
   assert.equal(gate.kind, "ineligible");
   assert.equal(gate.confidence, 20);
 
+  const missingIdentity = evidence.classifySimulationFailure({
+    simulation: {
+      success: false, action: "simulate", state: "simulation_blocked",
+      error: { code: "MISSING_IDENTITY", message: "Staged CI has no usable CMDB identity" },
+    },
+  }, { className: "cmdb_ci_linux_server", confidence: 50 });
+  assert.equal(missingIdentity.kind, "ineligible");
+  assert.equal(missingIdentity.message, "Staged CI has no usable CMDB identity");
+
   // hasCiSpecificIreResponse must be true for a failing simulation — we
   // still have a per-CI response, it just failed.
   assert.equal(evidence.hasCiSpecificIreResponse(workbench), true);

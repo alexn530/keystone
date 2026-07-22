@@ -898,7 +898,7 @@ function insertLifecycleEligible(item: WorkQueueItem, detail: Partial<AgentEvent
 }
 
 const CAMPAIGN_LEDGER_ACTIONS = new Set([
-  "ire_simulation_started", "ire_simulation_completed", "ire_simulation_failed",
+  "ire_simulation_started", "ire_simulation_completed", "ire_simulation_failed", "ire_simulation_blocked",
   "approval_review_deferred", "approval_recorded", "approval_resume_prepared",
   "ire_execution_claimed", "ire_execution_completed", "ire_execution_failed",
   "ire_execution_reconciliation_required", "ire_verification_claimed",
@@ -942,7 +942,7 @@ function latestRetryEvidence(timeline: TimelineEvent[], item: WorkQueueItem) {
     const detail = parseCampaignEventDetail(event.reasoning);
     if (!detail) continue;
     retryCount = Math.max(retryCount, typeof detail.retry_count === "number" ? detail.retry_count : 0);
-    if (detail.action === "ire_simulation_failed") {
+    if (detail.action === "ire_simulation_failed" || detail.action === "ire_simulation_blocked") {
       errorCode = typeof detail.error_code === "string" ? detail.error_code : errorCode;
       message = detail.summary || event.reasoning || message;
     }

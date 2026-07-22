@@ -33,7 +33,11 @@ require.extensions[".ts"] = function loadTypeScript(module, filename) {
 };
 
 const { mockCis } = require("../app/cmdb-data.ts");
-const { deriveRemediationWorkQueue } = require("../app/lib/cmdb/work-queue.ts");
+const {
+  deriveRemediationWorkQueue,
+  isCiScopedTimelineEvent,
+  isMaraObservationEvent,
+} = require("../app/lib/cmdb/work-queue.ts");
 const { normalizeIreActionResponse } = require("../app/lib/cmdb/ire.ts");
 
 const runId = "e0ac4df32b82871060aefba6b891bf5b";
@@ -87,6 +91,24 @@ const structuredVerification = deriveRemediationWorkQueue({ cis: [ci], timeline:
   }),
 }] });
 assert.equal(structuredVerification.items[0]?.bucket, "verified", "structured per-CI Phase D JSON is lifecycle evidence, not a Mara summary");
+
+const structuredSimulationBlocker = {
+  ...simulationEvent,
+  id: "ev-simulation-blocked",
+  recordName: "Remediate",
+  status: "error",
+  reasoning: JSON.stringify({
+    action: "ire_simulation_blocked",
+    status: "failed",
+    migration_run_id: runId,
+    staged_ci_id: ci.id,
+    correlation_id: "ks-simulate-missing-identity",
+    error_code: "MISSING_IDENTITY",
+    error_message: "Staged CI has no usable CMDB identity",
+  }),
+};
+assert.equal(isMaraObservationEvent(structuredSimulationBlocker), false, "structured simulation blockers are CI lifecycle evidence");
+assert.equal(isCiScopedTimelineEvent(structuredSimulationBlocker, ci), true, "structured simulation blockers remain scoped to the staged CI");
 
 const staleExecution = deriveRemediationWorkQueue({
   cis: [ci],

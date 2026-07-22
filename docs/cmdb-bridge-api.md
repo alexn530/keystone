@@ -77,6 +77,16 @@ mapping version, `retry_count=1`, and `max_retries=1` evidence, and refuses a
 second attempt. Isolated record failures continue; systemic authorization or
 configuration errors halt the group.
 
+Known aliases use a persisted two-step protocol. The first simulation records
+`CLASS_ALIAS_RETRY_AVAILABLE` and performs no IRE identification. An exact
+idempotency replay returns the same blocker. A later request with a new
+server-generated retry idempotency key may consume the single
+`normalize_known_class_alias` mapping. ServiceNow reconstructs the mapping from
+`class-alias-v1`; neither the browser nor Keystone supplies it. Payloads without
+any real `name`, host, FQDN, IP, MAC, serial, or asset tag record
+`MISSING_IDENTITY`. The staging transport identifier is not treated as CMDB
+identity evidence.
+
 ## ServiceNow table usage
 
 The lifecycle bridge uses the original six tables from `docs/servicenow-schema-inventory.md`:

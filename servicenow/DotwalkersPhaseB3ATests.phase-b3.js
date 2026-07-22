@@ -180,6 +180,24 @@ DotwalkersPhaseB3ATests.prototype = {
             'identifyCI must not be called on replay');
         this._assert(ctx.tracker.ledgerWrites.length === 0,
             'No ledger writes on replay');
+
+        // A blocked idempotency key is replayed as the same blocker and must
+        // never be reinterpreted as the later bounded retry request.
+        var blockedCtx = this._buildAllowlistedContext();
+        blockedCtx.service._findBlockedSimulation = function() {
+            return {
+                error_code: 'CLASS_ALIAS_RETRY_AVAILABLE',
+                summary: 'Known class alias is eligible for one deterministic retry'
+            };
+        };
+        var blocked = blockedCtx.service.simulate(this._baseRequest());
+        this._assert(blocked.success === false, 'blocked replay remains blocked');
+        this._assert(blocked.code === 'CLASS_ALIAS_RETRY_AVAILABLE',
+            'blocked replay preserves the exact error code');
+        this._assert(blockedCtx.tracker.buildWithStrategyCalls === 0,
+            'blocked replay must not rebuild or consume the retry');
+        this._assert(blockedCtx.tracker.identifyCiCalls === 0,
+            'blocked replay must not call identifyCI');
     },
 
     /**

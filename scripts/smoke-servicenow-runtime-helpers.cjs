@@ -113,8 +113,14 @@ const adapterExecutable = adapterSource.replace(/^\s*\/\/.*$/gm, '');
 
 assert.match(simulationSource, /this\.ERROR_CODE_MAP = \{/);
 assert.match(simulationSource, /_handleBlocker: function/);
+assert.match(simulationSource, /CLASS_ALIAS_RETRY_AVAILABLE/);
+assert.match(simulationSource, /MISSING_IDENTITY/);
+assert.match(simulationSource, /_findBlockedSimulation: function/);
 assert.match(simulationSource, /error && error\.error_code/);
 assert.match(payloadSource, /strategyError\.error_code = retryCount > 0/);
+assert.match(payloadSource, /_hasAliasRetryAvailable: function/);
+assert.match(payloadSource, /_validateUsableIdentity: function/);
+assert.match(payloadSource, /_validateAliasRetryCandidate: function/);
 assert.equal(registeredTests(b3aSource).length, 23);
 assert.equal(registeredTests(b3bSource).length, 41);
 assert.match(adapterSource, /svc\.simulate\(body, \{ mode: 'interactive' \}\)/);

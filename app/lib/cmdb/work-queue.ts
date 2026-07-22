@@ -235,7 +235,7 @@ function isStructuredCiLifecycleEvent(value: string) {
     const stagedCiId = typeof parsed.staged_ci_id === "string" ? parsed.staged_ci_id : "";
     const action = typeof parsed.action === "string" ? parsed.action : "";
     return /^[0-9a-f]{32}$/i.test(stagedCiId) && [
-      "ire_simulation_started", "ire_simulation_completed", "ire_simulation_failed",
+      "ire_simulation_started", "ire_simulation_completed", "ire_simulation_failed", "ire_simulation_blocked",
       "approval_review_deferred", "approval_recorded", "approval_resume_claimed", "approval_resume_prepared",
       "ire_execution_claimed", "ire_execution_completed", "ire_execution_failed",
       "ire_execution_reconciliation_required", "ire_verification_claimed",

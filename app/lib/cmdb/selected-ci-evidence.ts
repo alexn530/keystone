@@ -49,6 +49,8 @@ const INELIGIBLE_PATTERNS = [
   /confidence\s+gate/i,
   /held\s+by\s+confidence/i,
   /missing\s+(required\s+)?identifier/i,
+  /missing\s+(required\s+)?identity/i,
+  /no\s+usable\s+(cmdb\s+)?identity/i,
   /no\s+identifier/i,
   /insufficient\s+identifier/i,
 ];

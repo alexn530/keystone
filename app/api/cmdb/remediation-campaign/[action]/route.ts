@@ -139,7 +139,11 @@ function identifier(value: unknown) {
 
 function token(value: unknown, max: number) {
   const candidate = typeof value === "string" ? value.trim() : "";
-  return candidate.length <= max && /^[a-zA-Z0-9:._-]*$/.test(candidate) ? candidate : "";
+  // Work-group signatures are server-derived and may contain a normalized
+  // class label with spaces (for example, `class_alias:linux srv:class`).
+  // The campaign validator still requires an exact match to the authoritative
+  // server-generated plan before any action is invoked.
+  return candidate.length <= max && /^[a-zA-Z0-9:._ -]*$/.test(candidate) ? candidate : "";
 }
 
 function hex(value: unknown, length: number) {

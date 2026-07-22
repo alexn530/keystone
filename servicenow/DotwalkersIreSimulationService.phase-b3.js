@@ -63,7 +63,9 @@ DotwalkersIreSimulationService.prototype = {
             STAGED_CI_NOT_FOUND: { http_status: 404, message: 'Staged CI record not found' },
             RUN_STATE_INVALID: { http_status: 409, message: 'Migration run state does not allow simulation' },
             RETRY_LIMIT_REACHED: { http_status: 409, message: 'Retry limit reached for this CI simulation' },
+            CLASS_ALIAS_RETRY_AVAILABLE: { http_status: 409, message: 'Known class alias is eligible for one deterministic retry' },
             CANDIDATE_REJECTED: { http_status: 422, message: 'Staged CI is not eligible for simulation' },
+            MISSING_IDENTITY: { http_status: 422, message: 'Staged CI has no usable CMDB identity' },
             CLASS_NOT_ALLOWED: { http_status: 422, message: 'CMDB class is not allowlisted' },
             CLASS_INVALID: { http_status: 422, message: 'CMDB class is invalid' },
             UNSUPPORTED_CLASS_ALIAS: { http_status: 422, message: 'No supported deterministic strategy for this class alias' }
@@ -71,11 +73,15 @@ DotwalkersIreSimulationService.prototype = {
 
         this.BLOCKER_CODES = {
             RETRY_LIMIT_REACHED: true,
+            CLASS_ALIAS_RETRY_AVAILABLE: true,
+            MISSING_IDENTITY: true,
             UNSUPPORTED_CLASS_ALIAS: true
         };
 
         this.BLOCKER_SUMMARY_MAP = {
             RETRY_LIMIT_REACHED: 'Retry limit reached for this CI simulation',
+            CLASS_ALIAS_RETRY_AVAILABLE: 'Known class alias is eligible for one deterministic retry',
+            MISSING_IDENTITY: 'Staged CI has no usable CMDB identity',
             UNSUPPORTED_CLASS_ALIAS: 'No supported deterministic strategy for this class alias'
         };
 
@@ -671,6 +677,20 @@ DotwalkersIreSimulationService.prototype = {
             previous.success = true;
             previous.idempotent_replay = true;
             return previous;
+        }
+
+        var previousBlocker = this._findBlockedSimulation(request);
+        if (previousBlocker) {
+            var previousMapping = this.ERROR_CODE_MAP[previousBlocker.error_code];
+            return this._simulateError(
+                previousMapping.http_status,
+                previousBlocker.error_code,
+                previousBlocker.summary || previousMapping.message,
+                [],
+                'simulation_blocked',
+                request.correlation_id,
+                request.idempotency_key
+            );
         }
 
         try {
@@ -3298,6 +3318,33 @@ DotwalkersIreSimulationService.prototype = {
             }
         }
 
+        return null;
+    },
+
+    _findBlockedSimulation: function(request) {
+        var ledger = new GlideRecord(this.TABLES.ledger);
+        ledger.addQuery('migration_run', request.migration_run_id);
+        ledger.addQuery('event_type', 'error');
+        ledger.addQuery('actor', this.ACTOR);
+        ledger.addQuery(
+            'detail', 'CONTAINS',
+            '"idempotency_key":"' + request.idempotency_key + '"'
+        );
+        ledger.orderByDesc('sequence');
+        ledger.setLimit(10);
+        ledger.query();
+
+        while (ledger.next()) {
+            var detail = this._tryParseObject(ledger.getValue('detail'));
+            if (detail &&
+                detail.action === 'ire_simulation_blocked' &&
+                detail.migration_run_id === request.migration_run_id &&
+                detail.staged_ci_id === request.staged_ci_id &&
+                detail.idempotency_key === request.idempotency_key &&
+                this.ERROR_CODE_MAP[detail.error_code]) {
+                return detail;
+            }
+        }
         return null;
     },
 

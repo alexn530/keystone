@@ -286,7 +286,7 @@ function inferDecisionSource(value: string): AgentDecisionSource {
 function failureCategory(value: string): FailureCategory {
   const normalized = value.toLowerCase();
   if (/class[_ -]?alias|unsupported class|invalid proposed.*class|class mismatch|linux srv/.test(normalized)) return "class_alias";
-  if (/missing.*(?:serial|identifier|name|fqdn)|no identifier/.test(normalized)) return "missing_identifier";
+  if (/missing.*(?:identity|serial|identifier|name|fqdn)|no (?:usable )?(?:identity|identifier)/.test(normalized)) return "missing_identifier";
   if (/duplicate|multiple candidate|hostname collision|ambiguous identity/.test(normalized)) return "duplicate_identity";
   if (/stale|fingerprint/.test(normalized)) return "stale_simulation";
   if (/forbidden|unauthori|role|ownership/.test(normalized)) return "authorization";
