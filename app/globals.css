@@ -439,17 +439,18 @@ tbody tr:hover .row-arrow { color: var(--lime); transform: translateX(2px); }
 .tool-icon { width: 40px; height: 40px; display: grid; place-items: center; color: var(--lime); border: 1px solid rgba(199, 243, 77, .25); }
 .tool-copy { display: flex; flex-direction: column; gap: 7px; }.tool-copy small { color: var(--lime); font: 8px var(--mono); letter-spacing: .08em; }.tool-copy strong { font-family: var(--display); font-size: 18px; line-height: 1.18; font-weight: 400; }.tool-copy span { color: var(--faint); font-size: 10px; }
 .tool-impact { color: var(--lime); font: 14px var(--display); }
-.proposal-panel { padding: 22px; }
-.proposal-heading { display: flex; justify-content: space-between; align-items: center; }
-.draft-pill { padding: 4px 7px; color: var(--amber); border: 1px solid rgba(232, 178, 61, .3); font: 8px var(--mono); }
-.proposal-panel h2 { margin: 16px 0 8px; font-family: var(--display); font-size: 26px; line-height: 1.15; font-weight: 400; }
-.proposal-panel > p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.proposal-panel { padding: 22px; overflow: hidden; min-width: 0; }
+.proposal-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-width: 0; }
+.proposal-heading .eyebrow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.draft-pill { padding: 4px 7px; color: var(--amber); border: 1px solid rgba(232, 178, 61, .3); font: 8px var(--mono); white-space: nowrap; flex-shrink: 0; }
+.proposal-panel h2 { margin: 16px 0 8px; font-family: var(--display); font-size: 26px; line-height: 1.15; font-weight: 400; overflow-wrap: break-word; word-break: break-word; }
+.proposal-panel > p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; overflow-wrap: break-word; word-break: break-word; }
 .proposal-summary { display: grid; grid-template-columns: repeat(3, 1fr); margin: 20px 0; border: 1px solid var(--line); }
-.proposal-summary div { display: flex; flex-direction: column; gap: 6px; padding: 11px; border-right: 1px solid var(--line); }.proposal-summary div:last-child { border: 0; }
-.proposal-summary span { color: var(--faint); font-size: 8.5px; }.proposal-summary strong { color: var(--lime); font: 15px var(--display); }
+.proposal-summary div { display: flex; flex-direction: column; gap: 6px; padding: 11px; border-right: 1px solid var(--line); min-width: 0; overflow: hidden; }.proposal-summary div:last-child { border: 0; }
+.proposal-summary span { color: var(--faint); font-size: 8.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.proposal-summary strong { color: var(--lime); font: 15px var(--display); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .evidence-box { padding: 14px; margin-bottom: 14px; background: #0d100d; border: 1px solid var(--line); }.evidence-box > div { display: flex; align-items: center; gap: 7px; color: var(--lime); }.evidence-box strong { color: var(--ink); font-size: 11px; }.evidence-box ul { margin: 12px 0 0; padding-left: 16px; color: var(--muted); font-size: 10px; line-height: 1.6; }.evidence-box li::marker { color: var(--lime); }
-.action-message { display: flex; align-items: flex-start; gap: 8px; padding: 10px; margin-bottom: 12px; color: var(--green); background: rgba(89, 197, 139, .05); border: 1px solid rgba(89, 197, 139, .2); font-size: 10px; line-height: 1.4; animation: fadeIn .25s ease; }
-.no-direct-write { display: block; margin-top: 9px; color: var(--faint); font-size: 9px; text-align: center; }
+.action-message { display: flex; align-items: flex-start; gap: 8px; padding: 10px; margin-bottom: 12px; color: var(--green); background: rgba(89, 197, 139, .05); border: 1px solid rgba(89, 197, 139, .2); font-size: 10px; line-height: 1.4; animation: fadeIn .25s ease; overflow-wrap: break-word; word-break: break-word; min-width: 0; }
+.no-direct-write { display: block; margin-top: 9px; color: var(--faint); font-size: 9px; text-align: center; overflow-wrap: break-word; word-break: break-word; }
 .workbench-layout { display: grid; grid-template-columns: minmax(0, 1fr) 350px; gap: 12px; margin-top: 24px; align-items: start; }
 .staged-workbench { overflow: hidden; }
 .lifecycle-pill { padding: 5px 8px; color: var(--muted); border: 1px solid var(--line-strong); font: 8px var(--mono); letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
