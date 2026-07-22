@@ -71,7 +71,12 @@ assert.match(action, /validateAndClaimApprovalResume/);
 assert.match(action, /prepareApprovalResume/);
 assert.match(action, /recordApprovalResumePrepared/);
 assert.match(action, /recordApprovalResumeFailure/);
-assert.equal(/\.run\s*\(/.test(action), false, "Script Action must not invoke the Mara run loop");
+assert.match(action, /continuationToken === 'comprehend_complete'/);
+assert.match(action, /new DotwalkersMaraAgent\(\)\.run\(runId\)/);
+assert.ok(
+  action.indexOf("continuationToken === 'comprehend_complete'") < action.indexOf("validateAndClaimApprovalResume"),
+  "normal CPR dispatch must occur before approval-resume validation",
+);
 
 const preparation = mara.slice(mara.indexOf("prepareApprovalResume:"));
 assert.ok(preparation.startsWith("prepareApprovalResume:"));

@@ -40,10 +40,11 @@ that existing service.
    Preserve the installed server-side regression suites.
 8. `servicenow/ire_approve.phase-c.js`,
    `servicenow/remediate.phase-c.js`,
+   `servicenow/run_dotwalkers_comprehend.cpr.js`,
    `servicenow/run_dotwalkers_mara.phase-c.js`, and
    `servicenow/DotwalkersMaraAgent.phase-c.js`
    Are complete in-place Phase C patch sources for exact approval binding,
-   recoverable handoff, token claiming, and preparation-only Mara resume.
+   recoverable CPR handoff, token claiming, and fingerprint-bound Mara resume.
 9. `servicenow/DotwalkersPhaseCTests.phase-c.js`
    Is the separate 48-test, test-only Script Include. Phase B3B remains
    byte-for-byte unchanged at 41 registrations.
@@ -73,6 +74,8 @@ the Phase B3 payload in deployment handoffs to avoid duplicate class sources.
 | `remediate` | Existing POST resource, authentication, and ACL authorization | Replace the legacy `{fixId, tool}` writer with an identifier-only adapter over deterministic deferred-review binding. |
 | `ire_execute` | Existing `/ire/execute` compatibility path | Replace the deployed browser-triggered writer with the status-only Phase D adapter. The Mara prepared continuation is the only execution initiator. |
 | `ire_approve` | Authorization, target review, and approval evidence | Bind approval to one staged CI and fingerprint, then queue `x_kest_dotwalkers.mara.requested` with a compact resume token in `parm2`. |
+| `Run Dotwalkers Comprehend` | Existing import-triggered event and run ownership checks | If completed Comprehend evidence already exists on an `analyzing` run, queue `mara_recovery` instead of rerunning analysis or duplicating findings. |
+| `Run Dotwalkers Mara` | Existing event registration and Phase D continuation | Dispatch `comprehend_complete`/`mara_recovery` to normal Mara supervision; dispatch only canonical approval Event Ledger sys_ids to Phase D. |
 | Mara Script Action | Existing event and background execution | Validate `parm2` and call the existing Mara agent in approval-resume mode. Ignore malformed, stale, or repeated tokens. |
 | `DotwalkersMaraAgent` | Existing read-only loop and Prioritize handoff | Preserve `prepareApprovalResume(binding)` and add `continueApprovalResume(prepared)`, a deterministic non-LLM delegation to the existing simulation service. |
 | `ire_verify` | Existing `/ire/verify` compatibility path | Replace the deployed interactive writer with a status-only adapter. Correlated verification is invoked directly by the server-owned continuation. |
@@ -202,6 +205,8 @@ zero unavailable tables). Patch existing records only.
 | `sys_script_include` | `DotwalkersIreSimulationService` | `cf883837938e8710410e383efaba104e` | Patch in-place Phase D authority, claims, Execute, and Verify. |
 | `sys_script_include` | `DotwalkersMaraAgent` | `7a36feeb2b86071060aefba6b891bfb4` | Patch deterministic continuation method. |
 | `sysevent_script_action` | `Run Dotwalkers Mara` | `895b3eeb2bc6071060aefba6b891bfa1` | Patch prepared-to-Phase-D continuation. |
+| `sysevent_script_action` | `Run Dotwalkers Comprehend` | `4b513b3b938e4b10410e383efaba10cb` | Patch completed-analysis recovery without replaying Comprehend. |
+| `sys_ws_operation` | `comprehend` | `56bb237f93ca4b10410e383efaba10e7` | Queue Mara recovery when completed analysis is stranded in `analyzing`. |
 | `sys_ws_operation` | `ire_execute` | `5228b47d79f84099a3d1a4e5767cedf0` | Replace with status-only compatibility adapter. |
 | `sys_ws_operation` | `ire_verify` | `9e9b5cd7f60c4201b4bbc648d64dc43d` | Replace with status-only compatibility adapter. |
 | `sys_script_include` | `DotwalkersPhaseDTests` | `4b9cb8a893520750410e383efaba1092` | Installed test-only record. |
@@ -210,6 +215,15 @@ zero unavailable tables). Patch existing records only.
 
 Do not create schema, choices, indexes, event registrations, REST resources, or
 parallel runtime Script Includes.
+
+### CPR handoff repair
+
+The GET-only export `x_kest_dotwalkers-2026-07-22T06-51-48-081Z` proved that
+Phase D had replaced the shared `Run Dotwalkers Mara` Script Action with an
+approval-only handler. As a result, normal
+`parm2=comprehend_complete` events were rejected as malformed approval tokens.
+Patch the two existing Script Actions above in place. Do not create a second
+Mara event or action.
 
 ## Installation And GET-Only Validation
 

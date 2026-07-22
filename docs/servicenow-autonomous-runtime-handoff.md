@@ -21,6 +21,7 @@ list and `docs/lifecycle-acceptance-report.md` for acceptance classifications.
 - `servicenow/DotwalkersPhaseB3BTests.phase-b3.js`
 - `servicenow/ire_approve.phase-c.js`
 - `servicenow/remediate.phase-c.js`
+- `servicenow/run_dotwalkers_comprehend.cpr.js`
 - `servicenow/run_dotwalkers_mara.phase-c.js`
 - `servicenow/DotwalkersMaraAgent.phase-c.js`
 - `servicenow/DotwalkersPhaseCTests.phase-c.js`
@@ -54,6 +55,12 @@ Preserve deployed role, run-linkage, identifier-only, idempotency, concurrency,
 approval, and verification controls. Add no schema or Event Ledger choices,
 keep `/api/cmdb/*` compatibility, and make no direct `cmdb_ci*` or
 `cmdb_rel_ci` writes.
+
+The Mara event is intentionally dual-purpose. `comprehend_complete` and
+`mara_recovery` enter the normal supervisor and Prioritize path. Only a
+canonical approval Event Ledger sys_id may enter the Phase D continuation.
+The Comprehend Script Action detects completed analysis on an `analyzing` run
+and requeues Mara without rerunning analysis.
 
 ## Validation Gate
 

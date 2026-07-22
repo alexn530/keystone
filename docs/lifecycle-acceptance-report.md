@@ -115,3 +115,18 @@ through this bounded campaign loop. No live grouped approval has been sent. The
 server-only group-approval gate remains closed pending a fresh GET-derived 3–5
 record manifest and explicit action-time authorization naming its run,
 campaign ID, manifest hash, item count, staged CI IDs, and fingerprints.
+
+## CPR End-to-End Handoff Repair
+
+A GET-only trace of stress run `065821a42b1e835060aefba6b891bf53`
+showed successful Comprehend completion at Event Ledger sequence 18, followed
+by no Mara or Prioritize evidence. The deployed shared Mara Script Action was
+handling every event as a Phase D approval resume, so it rejected the normal
+`comprehend_complete` token and left the run in `analyzing`.
+
+The source-controlled repair restores explicit dual dispatch and adds a
+completed-analysis recovery path. Agent Workspace now detects this evidence
+gap, keeps Prioritize active instead of presenting Remediate as runnable, and
+offers `Resume agents`. Recovery reuses persisted Comprehend evidence and must
+not duplicate analysis or findings. The repair is repository-validated but is
+not yet installed in ServiceNow.

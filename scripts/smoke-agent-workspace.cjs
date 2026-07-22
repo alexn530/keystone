@@ -23,6 +23,7 @@ require.extensions[".ts"] = function loadTypeScript(module, filename) {
 
 const { deriveRemediationWorkQueue } = require("../app/lib/cmdb/work-queue.ts");
 const { deriveAgentWorkspaceSnapshot } = require("../app/lib/cmdb/agent-workspace.ts");
+const { deriveWorkspaceViewState, hasCprHandoffGap } = require("../app/lib/cmdb/workspace-view-state.ts");
 const { sanitizeIreRequest } = require("../app/api/cmdb/ire/[action]/route.ts");
 
 const runId = "e0ac4df32b82871060aefba6b891bf5b";
@@ -57,6 +58,29 @@ assert.equal(snapshot.groups.find(group => group.category === "class_alias")?.st
 assert.match(snapshot.groups.find(group => group.category === "missing_identifier")?.blocker || "", /identity evidence/i);
 assert.deepEqual(snapshot.health, { baseline: 70, verified: 74, projected: 80, realizedLift: 4, remainingLift: 6 });
 assert.deepEqual(snapshot.relationships, { total: 1, ready: 0, blocked: 1 });
+
+const completedComprehend = [
+  event(1, "Analysis completed", "Comprehend", "Analysis completed. 2000 staged CIs processed."),
+];
+assert.equal(hasCprHandoffGap("analyzing", completedComprehend), true);
+assert.equal(hasCprHandoffGap("analyzing", [...completedComprehend, event(2, "Mara started", "Mara", "Supervisor started")]), false);
+assert.equal(hasCprHandoffGap("awaiting_approval", completedComprehend), false);
+
+const handoffView = deriveWorkspaceViewState({
+  runLabel: "RUN-HANDOFF",
+  runId,
+  runState: "analyzing",
+  apiState: "live",
+  cis,
+  timeline: completedComprehend,
+  relationships,
+  findings,
+  reviews: [],
+  health,
+});
+assert.equal(handoffView.handoffGap, true);
+assert.equal(handoffView.prioritizeStatus, "working", "locally derived groups cannot impersonate live Prioritize evidence");
+assert.equal(handoffView.activePhase, "prioritize");
 
 const execute = sanitizeIreRequest("execute", {
   migration_run_id: runId,

@@ -38,6 +38,7 @@ export function AgentWorkspaceView(props: {
   onOpenEvidence: () => void;
   onOpenRun?: (entry: { id: string; label: string }) => void;
   onRefresh: () => void;
+  onRecoverPipeline?: () => void;
 }) {
   const view = useMemo(() => deriveWorkspaceViewState({
     runLabel: props.runLabel,
@@ -105,6 +106,17 @@ export function AgentWorkspaceView(props: {
 
   return <div className="page agent-workspace-page">
     <FactoryHeader view={view} sourceLabel={sourceLabel} runLabel={props.runLabel} onRefresh={props.onRefresh} onOpenSummary={openSummary} />
+
+    {view.handoffGap && <section className="workspace-recovery" role="status">
+      <div>
+        <small>PIPELINE HANDOFF</small>
+        <strong>Comprehend finished, but Mara never started.</strong>
+        <p>Resume from persisted evidence without repeating analysis or duplicating findings.</p>
+      </div>
+      <button className="primary-button" onClick={props.onRecoverPipeline} disabled={!props.onRecoverPipeline || props.analysisState === "starting"}>
+        <Icon name="refresh" size={15} /> {props.analysisState === "starting" ? "Resuming…" : "Resume agents"}
+      </button>
+    </section>}
 
     <RunJourneyBanner journey={journey} />
 

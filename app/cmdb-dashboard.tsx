@@ -425,11 +425,11 @@ export function CmdbDashboard() {
    * Ask ServiceNow to start DotwalkersComprehendAgent for this run. Comprehend
    * queues Mara and Mara queues Prioritize, so this is the only trigger sent.
    */
-  const startComprehend = useCallback(async (runId: string) => {
-    if (!runId || comprehendStarted.current.has(runId)) return;
+  const startComprehend = useCallback(async (runId: string, recoverHandoff = false) => {
+    if (!runId || (!recoverHandoff && comprehendStarted.current.has(runId))) return;
     comprehendStarted.current.add(runId);
     setAnalysisState("starting");
-    setAnalysisMessage("Starting Comprehend analysis…");
+    setAnalysisMessage(recoverHandoff ? "Resuming Mara from completed Comprehend evidence…" : "Starting Comprehend analysis…");
     try {
       const response = await fetch("/api/cmdb/comprehend", {
         method: "POST",
@@ -457,7 +457,9 @@ export function CmdbDashboard() {
           ? "Analysis already completed for this run — displaying existing results."
           : alreadyRunning
             ? "Analysis is already running for this run."
-            : "Analysis started. ServiceNow is processing this run.",
+            : recoverHandoff
+              ? "Agent handoff resumed. ServiceNow is starting Mara and Prioritize."
+              : "Analysis started. ServiceNow is processing this run.",
       );
       void refreshRunResources(runId);
     } catch (error) {
@@ -803,9 +805,9 @@ export function CmdbDashboard() {
         onOpenRun={(entry) => openRun({ id: entry.id, label: entry.label })}
         onNewImport={() => setSection("import")}
       />}
-      {(section === "workspace" || section === "approvals") && <AgentWorkspaceView runLabel={activeRunLabel} runId={activeRunId} runState={runRecord?.state ?? ""} apiState={apiState} analysisState={analysisState} cis={cis} timeline={timeline} relationships={relationships} findings={findings} reviews={reviews} health={health} focus={section === "approvals" ? "approvals" : "overview"} onOpenPhase={phase => setSection(phase)} onOpenVerify={() => setSection("evidence")} onOpenRemediation={stagedCiId => { setRemediationTargetId(stagedCiId ?? ""); setSection("remediate"); }} onOpenEvidence={() => setSection("evidence")} onOpenRun={(entry) => openRun({ id: entry.id, label: entry.label })} onRefresh={() => void loadData(activeRunId)} />}
+      {(section === "workspace" || section === "approvals") && <AgentWorkspaceView runLabel={activeRunLabel} runId={activeRunId} runState={runRecord?.state ?? ""} apiState={apiState} analysisState={analysisState} cis={cis} timeline={timeline} relationships={relationships} findings={findings} reviews={reviews} health={health} focus={section === "approvals" ? "approvals" : "overview"} onOpenPhase={phase => setSection(phase)} onOpenVerify={() => setSection("evidence")} onOpenRemediation={stagedCiId => { setRemediationTargetId(stagedCiId ?? ""); setSection("remediate"); }} onOpenEvidence={() => setSection("evidence")} onOpenRun={(entry) => openRun({ id: entry.id, label: entry.label })} onRefresh={() => void loadData(activeRunId)} onRecoverPipeline={() => activeRunId && void startComprehend(activeRunId, true)} />}
       {section === "evidence" && <LiveOpsView timeline={timeline} activeRunId={activeRunId} apiState={apiState} resourceStatus={resourceState.timeline} paused={livePaused} refreshing={liveRefreshing} refreshCount={liveRefreshCount} onPausedChange={setLivePaused} onRefresh={() => void refreshLiveTimeline()} />}
-      {section === "comprehend" && <ComprehendView health={health} timeline={timeline} frames={playbackFrames} relationships={relationships} cis={filteredCis} allCis={cis} selectedCi={selectedCi} setSelectedCi={setSelectedCi} search={search} setSearch={setSearch} filter={filter} setFilter={setFilter} playing={playing} activeStep={clampedActiveStep} startPlayback={startPlayback} setActiveStep={setActiveStep} onStepFrame={stepFrame} onRestartPlayback={restartPlayback} apiState={apiState} resourceState={resourceState} activeRunId={activeRunId} runDraft={runDraft} setRunDraft={setRunDraft} loadRun={loadRunFromDraft} clearRun={() => { setRunDraft(""); openRun({ id: "", label: "" }); }} analysisState={analysisState} analysisMessage={analysisMessage} runState={runRecord?.state ?? ""} onStartAnalysis={() => activeRunId && void startComprehend(activeRunId)} />}
+      {section === "comprehend" && <ComprehendView health={health} timeline={timeline} frames={playbackFrames} relationships={relationships} cis={filteredCis} allCis={cis} selectedCi={selectedCi} setSelectedCi={setSelectedCi} search={search} setSearch={setSearch} filter={filter} setFilter={setFilter} playing={playing} activeStep={clampedActiveStep} startPlayback={startPlayback} setActiveStep={setActiveStep} onStepFrame={stepFrame} onRestartPlayback={restartPlayback} apiState={apiState} resourceState={resourceState} activeRunId={activeRunId} runDraft={runDraft} setRunDraft={setRunDraft} loadRun={loadRunFromDraft} clearRun={() => { setRunDraft(""); openRun({ id: "", label: "" }); }} analysisState={analysisState} analysisMessage={analysisMessage} runState={runRecord?.state ?? ""} onStartAnalysis={(recover) => activeRunId && void startComprehend(activeRunId, recover)} />}
       {section === "live" && <LiveOpsView timeline={timeline} activeRunId={activeRunId} apiState={apiState} resourceStatus={resourceState.timeline} paused={livePaused} refreshing={liveRefreshing} refreshCount={liveRefreshCount} onPausedChange={setLivePaused} onRefresh={() => void refreshLiveTimeline()} />}
       {section === "hr" && <AgentHrView timeline={timeline} timelineLive={resourceState.timeline === "live"} cis={resourceState.cis === "live" ? cis : null} activeRunId={activeRunId} />}
       {section === "prioritize" && <PrioritizeView health={health} recalculating={apiState === "connecting"} onRecalculate={() => void loadData(activeRunId)} onFix={(fix) => { setQueuedFix(fix); setActionMessage(""); setSection("remediate"); }} />}
@@ -840,7 +842,7 @@ function ComprehendView(props: {
   startPlayback: () => void; setActiveStep: (value: number) => void; onStepFrame: (delta: number) => void; onRestartPlayback: () => void;
   apiState: ApiState; resourceState: ResourceState;
   activeRunId: string; runDraft: string; setRunDraft: (value: string) => void; loadRun: () => void; clearRun: () => void;
-  analysisState: AnalysisState; analysisMessage: string; runState: string; onStartAnalysis: () => void;
+  analysisState: AnalysisState; analysisMessage: string; runState: string; onStartAnalysis: (recoverHandoff?: boolean) => void;
 }) {
   const { health, timeline, frames, relationships, cis, allCis, setSelectedCi, search, setSearch, filter, setFilter, playing, activeStep, startPlayback, setActiveStep, onStepFrame, onRestartPlayback, apiState, resourceState, activeRunId, runDraft, setRunDraft, loadRun, clearRun, analysisState, analysisMessage, runState, onStartAnalysis } = props;
   const cisLive = resourceState.cis === "live";
@@ -868,8 +870,11 @@ function ComprehendView(props: {
     : "Demo snapshot";
   const analysisWorking = analysisState === "starting"
     || (Boolean(runState) && !terminalRunStates.has(runState) && !isDraftRunState(runState));
-  const canManuallyStart = isDraftRunState(runState) && Boolean(activeRunId) && analysisState !== "starting";
-  const startButtonLabel = analysisState === "error" ? "Retry analysis" : "Start analysis";
+  const comprehendComplete = timeline.some(event => /Comprehend/i.test(`${event.source} ${event.name} ${event.reasoning}`) && /(?:Analysis completed|Deterministic specialist sequence completed)/i.test(event.reasoning));
+  const downstreamStarted = timeline.some(event => /\b(?:Mara|Prioritize|PriorityScorer)\b/i.test(`${event.source} ${event.name} ${event.reasoning}`));
+  const canRecoverHandoff = runState === "analyzing" && comprehendComplete && !downstreamStarted;
+  const canManuallyStart = (isDraftRunState(runState) || canRecoverHandoff) && Boolean(activeRunId) && analysisState !== "starting";
+  const startButtonLabel = canRecoverHandoff ? "Resume agent handoff" : analysisState === "error" ? "Retry analysis" : "Start analysis";
   const demoFallback = !activeRunId && apiState === "demo";
   const proposedEdgeLabel = `${relationships.length.toLocaleString()} PROPOSED ${relationships.length === 1 ? "EDGE" : "EDGES"}`;
   const proposedEdgeDelta = `${relationships.length.toLocaleString()} proposed ${relationships.length === 1 ? "edge" : "edges"}`;
@@ -881,7 +886,7 @@ function ComprehendView(props: {
       <label className="run-id-field"><span>RUN SYS_ID</span><input value={runDraft} onChange={event => setRunDraft(event.target.value)} onKeyDown={event => { if (event.key === "Enter") loadRun(); }} placeholder="Paste migration_run sys_id" /></label>
       <div className="run-context-actions">
         <button className="primary-button" onClick={loadRun}><Icon name="refresh" size={15} /> Load run</button>
-        {canManuallyStart && <button className="primary-button" onClick={onStartAnalysis} title="This run is in draft — ServiceNow has not queued Comprehend yet."><Icon name="spark" size={15} /> {startButtonLabel}</button>}
+        {canManuallyStart && <button className="primary-button" onClick={() => onStartAnalysis(canRecoverHandoff)} title={canRecoverHandoff ? "Resume Mara from completed Comprehend evidence." : "This run is in draft — ServiceNow has not queued Comprehend yet."}><Icon name="spark" size={15} /> {startButtonLabel}</button>}
         {activeRunId && <button className="ghost-button" onClick={clearRun}>All runs</button>}
       </div>
       {(analysisMessage || (canManuallyStart && analysisState === "idle")) && (

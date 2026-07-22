@@ -125,6 +125,7 @@ export type WorkspaceViewState = {
   requiresApproval: boolean;
   requiresReview: boolean;
   approvalPacketPrepared: boolean;
+  handoffGap: boolean;
 
   currentAgent: string;
   currentTool?: string;
@@ -183,6 +184,7 @@ export function deriveWorkspaceViewState(input: WorkspaceViewInput): WorkspaceVi
   const workGroupCount = snapshot.groups.length;
   const queueApprovalCount = snapshot.approvals.length;
   const approvalPacketPrepared = timelineHasApprovalPacket(input.timeline);
+  const handoffGap = hasCprHandoffGap(input.runState, input.timeline);
   const criticalUnresolvedFindings = input.findings.filter(f => (f.severity || "").toLowerCase() === "critical").length;
 
   const requiresApproval =
@@ -212,6 +214,7 @@ export function deriveWorkspaceViewState(input: WorkspaceViewInput): WorkspaceVi
     verifyStatus,
     requiresApproval,
     hasRun,
+    handoffGap,
   });
 
   const activityCards = buildActivityCards(input.timeline).slice(-14);
@@ -296,6 +299,7 @@ export function deriveWorkspaceViewState(input: WorkspaceViewInput): WorkspaceVi
     requiresApproval,
     requiresReview,
     approvalPacketPrepared,
+    handoffGap,
     currentAgent,
     currentTool,
     currentAction,
@@ -319,6 +323,21 @@ function timelineHasApprovalPacket(timeline: TimelineEvent[]) {
   });
 }
 
+export function hasCprHandoffGap(runState: string, timeline: TimelineEvent[]) {
+  if (runState.trim().toLowerCase() !== "analyzing") return false;
+  const comprehendComplete = timeline.some(event => {
+    const text = `${event.source} ${event.name} ${event.reasoning}`;
+    return /Comprehend/i.test(text)
+      && /(?:Analysis completed|Deterministic specialist sequence completed)/i.test(text);
+  });
+  if (!comprehendComplete) return false;
+  const downstreamStarted = timeline.some(event => {
+    const text = `${event.source} ${event.name} ${event.reasoning}`;
+    return /\b(?:Mara|Prioritize|PriorityScorer)\b/i.test(text);
+  });
+  return !downstreamStarted;
+}
+
 function deriveComprehendStatus(input: WorkspaceViewInput, snapshot: AgentWorkspaceSnapshot): PhaseStatus {
   const state = snapshot.phases.find(p => p.id === "comprehend")?.state;
   if (state === "complete" || state === "working" || state === "waiting" || state === "blocked" || state === "approval_required") return state;
@@ -329,11 +348,12 @@ function deriveComprehendStatus(input: WorkspaceViewInput, snapshot: AgentWorksp
 
 function derivePrioritizeStatus(input: WorkspaceViewInput, snapshot: AgentWorkspaceSnapshot, workGroupCount: number): PhaseStatus {
   const snapshotState = snapshot.phases.find(p => p.id === "prioritize")?.state;
-  if (snapshotState === "complete") return "complete";
-  // Ranked work groups are the definition of "prioritize complete".
-  if (workGroupCount > 0) return "complete";
   const priorityEvent = input.timeline.find(event => /priorit|ranked|group_|work group|scoring/i.test(`${event.name} ${event.reasoning}`));
   if (priorityEvent) return priorityEvent.status === "active" ? "working" : "complete";
+  // Live groups can be derived locally from Comprehend findings before the
+  // ServiceNow Prioritize agent has actually run. Only demo/fallback data may
+  // use those groups as completion evidence.
+  if ((input.apiState === "demo" || !input.runId) && (snapshotState === "complete" || workGroupCount > 0)) return "complete";
   const comprehendDone = input.timeline.some(event => event.step >= 3);
   return comprehendDone ? "working" : "waiting";
 }
@@ -375,8 +395,10 @@ function pickActivePhase(input: {
   verifyStatus: PhaseStatus;
   requiresApproval: boolean;
   hasRun: boolean;
+  handoffGap: boolean;
 }): WorkspacePhaseId {
   if (!input.hasRun) return "comprehend";
+  if (input.handoffGap) return "prioritize";
   if (input.requiresApproval || input.remediateStatus === "approval_required") return "remediate";
   if (input.verifyStatus === "working") return "verify";
   if (input.remediateStatus === "working" || input.remediateStatus === "blocked") return "remediate";
