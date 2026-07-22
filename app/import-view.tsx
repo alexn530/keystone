@@ -19,41 +19,6 @@ export type { ImportedRun } from "./lib/cmdb/run-id";
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const PREVIEW_LIMIT = 6;
 
-const sourcePresets = [
-  {
-    id: "microsoft-365",
-    company: "Microsoft",
-    label: "Microsoft 365 endpoints",
-    format: "Nested JSON",
-    url: "https://endpoints.office.com/endpoints/worldwide?clientrequestid=00000000-0000-0000-0000-000000000000",
-    note: "Services, endpoint categories, URLs and IP ranges.",
-  },
-  {
-    id: "cloudflare-status",
-    company: "Cloudflare",
-    label: "Cloudflare service components",
-    format: "Nested JSON",
-    url: "https://www.cloudflarestatus.com/api/v2/components.json",
-    note: "Component hierarchy and current operational state.",
-  },
-  {
-    id: "atlassian-status",
-    company: "Atlassian",
-    label: "Atlassian service components",
-    format: "Nested JSON",
-    url: "https://status.atlassian.com/api/v2/components.json",
-    note: "Products, regional components and live status.",
-  },
-  {
-    id: "legacy-export",
-    company: "Legacy estate",
-    label: "IMS / Db2 export",
-    format: "CSV or spreadsheet",
-    url: "",
-    note: "Hierarchical and relational exports uploaded as files.",
-  },
-] as const;
-
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -145,21 +110,6 @@ export function ImportGatewayView({ onOpenRun }: { onOpenRun: (run?: ImportedRun
     } else {
       setPreviewRows([]);
       setParseError("");
-    }
-  }
-
-  function choosePreset(preset: typeof sourcePresets[number]) {
-    setSourceName(preset.label);
-    if (preset.url) {
-      changeMode("url");
-      setSourceUrl(
-        preset.id === "microsoft-365" && typeof crypto !== "undefined" && "randomUUID" in crypto
-          ? preset.url.replace("00000000-0000-0000-0000-000000000000", crypto.randomUUID())
-          : preset.url,
-      );
-    } else {
-      changeMode("file");
-      fileInput.current?.click();
     }
   }
 
@@ -430,19 +380,6 @@ export function ImportGatewayView({ onOpenRun }: { onOpenRun: (run?: ImportedRun
       </div>
 
       <aside className="gateway-side">
-        <div className="panel source-library">
-          <div className="panel-heading compact"><div><span className="section-index">03</span><div><h2>Source starters</h2><p>Versatile demo inputs</p></div></div></div>
-          <div className="source-list">
-            {sourcePresets.map(preset => <button key={preset.id} onClick={() => choosePreset(preset)}>
-              <span className="source-company">{preset.company}</span>
-              <strong>{preset.label}</strong>
-              <p>{preset.note}</p>
-              <small>{preset.format}</small>
-              <Icon name="arrow" size={14} />
-            </button>)}
-          </div>
-        </div>
-
         <div className="panel stage-card">
           <span className="eyebrow accent">STAGING CONTRACT</span>
           <h2>Land first. Decide second.</h2>
