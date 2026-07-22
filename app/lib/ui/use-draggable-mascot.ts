@@ -15,7 +15,10 @@
 //     viewport does not overwrite the wide-viewport placement.
 //   - Arrow keys nudge by KEY_STEP_PX; reset() reverts to the default anchor.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+
+// Stable no-op subscription for the hydration flag below.
+const noopSubscribe = () => () => {};
 
 const DESKTOP_KEY = "keystone.mara.pos.desktop";
 const MOBILE_KEY = "keystone.mara.pos.mobile";
@@ -123,6 +126,20 @@ export function useDraggableMascot(): UseDraggableMascotResult {
   });
   const [wasDragged, setWasDragged] = useState(false);
   const [dragging, setDragging] = useState(false);
+  // Until the component has mounted on the client, or until the user has
+  // actually moved her, we anchor with CSS to the free bottom-right corner.
+  // This guarantees she paints on-screen regardless of the SSR viewport
+  // guess — the old bug placed her off-screen for a 1440x900 default until a
+  // resize/zoom forced a re-clamp.
+  // False during SSR and the first hydration render, true thereafter — so the
+  // first client paint uses the corner anchor, then we switch to the clamped
+  // client-side position.
+  const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false);
+  const [hasCustom, setHasCustom] = useState<boolean>(() => {
+    const vp = readViewport();
+    const mobile = readIsMobile();
+    return readStoredPosition(mobile, vp) !== null;
+  });
   const dragStateRef = useRef<{ startX: number; startY: number; originX: number; originY: number; moved: boolean; pointerId: number; captureEl: HTMLElement | null } | null>(null);
   const moveListenerRef = useRef<((ev: PointerEvent) => void) | null>(null);
   const upListenerRef = useRef<((ev: PointerEvent) => void) | null>(null);
@@ -212,7 +229,7 @@ export function useDraggableMascot(): UseDraggableMascotResult {
       const dx = ev.clientX - state.startX;
       const dy = ev.clientY - state.startY;
       if (!state.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
-      if (!state.moved) setDragging(true);
+      if (!state.moved) { setDragging(true); setHasCustom(true); }
       state.moved = true;
       const candidate = { x: state.originX + dx, y: state.originY + dy };
       const next = clampPosition(candidate, isMobile, readViewport());
@@ -245,6 +262,7 @@ export function useDraggableMascot(): UseDraggableMascotResult {
   const onKeyDown = useCallback((event: React.KeyboardEvent<HTMLElement>) => {
     if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) return;
     event.preventDefault();
+    setHasCustom(true);
     setPosition(current => {
       const dx = event.key === "ArrowLeft" ? -KEY_STEP_PX : event.key === "ArrowRight" ? KEY_STEP_PX : 0;
       const dy = event.key === "ArrowUp" ? -KEY_STEP_PX : event.key === "ArrowDown" ? KEY_STEP_PX : 0;
@@ -260,6 +278,7 @@ export function useDraggableMascot(): UseDraggableMascotResult {
     const mobile = readIsMobile();
     const next = defaultPosition(mobile, vp);
     setPosition(next);
+    setHasCustom(false);
     try {
       if (typeof window !== "undefined") {
         window.localStorage.removeItem(mobile ? MOBILE_KEY : DESKTOP_KEY);
@@ -273,18 +292,32 @@ export function useDraggableMascot(): UseDraggableMascotResult {
     ? position
     : defaultPosition(isMobile, viewport);
 
-  const style: React.CSSProperties = {
+  // Corner anchor (bottom-right, clear of the mobile nav) is the safe default;
+  // only switch to absolute left/top once the user has deliberately moved her.
+  const cornerAnchored = !mounted || !hasCustom;
+  const base: React.CSSProperties = {
     position: "fixed",
-    left: safePosition.x,
-    top: safePosition.y,
-    right: "auto",
-    bottom: "auto",
     touchAction: "none",
     zIndex: 9000,
     pointerEvents: "auto",
     // Break out of any stacking / containment context set by ancestor panels.
     contain: "none" as unknown as React.CSSProperties["contain"],
   };
+  const style: React.CSSProperties = cornerAnchored
+    ? {
+        ...base,
+        right: isMobile ? 12 : 22,
+        bottom: isMobile ? 88 : 22,
+        left: "auto",
+        top: "auto",
+      }
+    : {
+        ...base,
+        left: safePosition.x,
+        top: safePosition.y,
+        right: "auto",
+        bottom: "auto",
+      };
 
   return {
     containerRef,
