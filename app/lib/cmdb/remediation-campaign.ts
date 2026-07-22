@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { ConfigurationItem, HealthData, Relationship, TimelineEvent } from "../../cmdb-data";
 import type { RemediationFinding, RemediationReview } from "./comprehend-adapter";
-import { deriveAgentWorkGroups, parseAgentEventDetail, type AgentWorkGroup } from "./agent-workspace";
+import { deriveAgentWorkGroups, parseAgentEventDetail, type AgentEventDetailV1, type AgentWorkGroup } from "./agent-workspace";
 import type { IreActionResponse } from "./ire";
 import { deriveRemediationWorkQueue, isCiScopedTimelineEvent, sortTimelineByFreshness, type WorkQueueItem } from "./work-queue";
 
@@ -90,6 +90,14 @@ export type RemediationApprovalManifestItem = {
   strategy_id?: "normalize_known_class_alias";
   mapping_version?: string;
   retry_count: number;
+};
+
+export type RemediationReviewProposalItem = {
+  staged_ci_id: string;
+  name: string;
+  finding_id: string;
+  simulation_correlation_id: string;
+  simulation_fingerprint: string;
 };
 
 export type RemediationApprovalManifest = {
@@ -317,6 +325,35 @@ export function prepareRemediationApprovalManifest(
   };
 }
 
+/**
+ * Return simulation-bound proposal records that still need a deferred review.
+ * The API route persists them, reloads ServiceNow, and freezes a manifest only
+ * from the reloaded authoritative evidence.
+ */
+export function pendingRemediationReviewProposals(
+  snapshot: RemediationCampaignSnapshot,
+  selection: CampaignSelection,
+): RemediationReviewProposalItem[] {
+  const plan = validateCampaignSelection(snapshot, selection);
+  const context = campaignContext(snapshot);
+  const byId = new Map(context.queueItems.map(item => [item.stagedCiId, item]));
+  const items: RemediationReviewProposalItem[] = [];
+  for (const planned of plan.items) {
+    const queueItem = byId.get(planned.staged_ci_id);
+    if (!queueItem || queueItem.review) continue;
+    const evidence = latestSimulationEvidence(snapshot.timeline, queueItem);
+    if (preReviewExclusion(queueItem, evidence)) continue;
+    items.push({
+      staged_ci_id: queueItem.stagedCiId,
+      name: queueItem.ci.name,
+      finding_id: evidence!.finding_id!,
+      simulation_correlation_id: evidence!.simulation_correlation_id!,
+      simulation_fingerprint: evidence!.simulation_fingerprint!,
+    });
+  }
+  return items.sort((left, right) => left.staged_ci_id.localeCompare(right.staged_ci_id));
+}
+
 export async function approveRemediationCampaign(
   snapshot: RemediationCampaignSnapshot,
   selection: CampaignSelection,
@@ -497,13 +534,23 @@ function approvalExclusion(item: WorkQueueItem, evidence: ReturnType<typeof late
   return "";
 }
 
+function preReviewExclusion(item: WorkQueueItem, evidence: ReturnType<typeof latestSimulationEvidence>) {
+  if (!evidence) return "No completed canonical simulation was found.";
+  if (!evidence.simulation_correlation_id) return "Simulation correlation is missing.";
+  if (!/^[0-9A-F]{64}$/.test(evidence.simulation_fingerprint ?? "")) return "Canonical simulation fingerprint is missing or malformed.";
+  if (evidence.operation !== "UPDATE" && evidence.operation !== "NO_CHANGE") return (evidence.operation || "Unknown") + " is not eligible for group approval.";
+  if (!evidence.finding_id || !/^[0-9a-f]{32}$/i.test(evidence.finding_id)) return "Actionable finding evidence is missing.";
+  if (item.bucket === "blocked" || item.bucket === "simulation_failed") return "Latest persisted evidence is blocked.";
+  return "";
+}
+
 function latestSimulationEvidence(timeline: TimelineEvent[], item: WorkQueueItem) {
   const events = sortTimelineByFreshness(timeline.filter(event => {
-    const detail = parseAgentEventDetail(event.reasoning);
+    const detail = parseCampaignEventDetail(event.reasoning);
     return detail?.staged_ci_id?.toLowerCase() === item.stagedCiId.toLowerCase() || isCiScopedTimelineEvent(event, item.ci);
   }));
   for (const event of [...events].reverse()) {
-    const detail = parseAgentEventDetail(event.reasoning);
+    const detail = parseCampaignEventDetail(event.reasoning);
     if (!detail || detail.action !== "ire_simulation_completed") continue;
     return {
       simulation_correlation_id: detail.simulation_correlation_id || detail.correlation_id,
@@ -520,9 +567,9 @@ function latestSimulationEvidence(timeline: TimelineEvent[], item: WorkQueueItem
 
 function campaignLifecycleEvidence(timeline: TimelineEvent[], item: WorkQueueItem) {
   const evidence = sortTimelineByFreshness(timeline.filter(event => {
-    const detail = parseAgentEventDetail(event.reasoning);
+    const detail = parseCampaignEventDetail(event.reasoning);
     return detail?.staged_ci_id?.toLowerCase() === item.stagedCiId.toLowerCase();
-  })).map(event => ({ event, detail: parseAgentEventDetail(event.reasoning)! }));
+  })).map(event => ({ event, detail: parseCampaignEventDetail(event.reasoning)! }));
   for (const { detail } of [...evidence].reverse()) {
     if (detail.action === "verification_passed") return {
       lifecycle: "verified", bucket: "verified",
@@ -628,6 +675,35 @@ function normalizeIds(values?: string[]) {
 
 function safeOperationFamily(operation: string) {
   return operation === "UPDATE" || operation === "NO_CHANGE" ? "safe-update" : operation.toLowerCase();
+}
+
+const CAMPAIGN_LEDGER_ACTIONS = new Set([
+  "ire_simulation_started", "ire_simulation_completed", "ire_simulation_failed",
+  "approval_review_deferred", "approval_recorded", "approval_resume_prepared",
+  "ire_execution_claimed", "ire_execution_completed", "ire_execution_failed",
+  "ire_execution_reconciliation_required", "ire_verification_claimed",
+  "verification_passed", "verification_failed",
+]);
+
+/**
+ * Phase B3/D evidence predates the `keystone.agent.v1` envelope in some live
+ * instances, but still persists the same allowlisted lifecycle fields as JSON.
+ * Campaign reconstruction accepts only known lifecycle actions from that
+ * legacy shape; arbitrary JSON remains rejected.
+ */
+export function parseCampaignEventDetail(value: string): Partial<AgentEventDetailV1> & { action: string } | null {
+  const canonical = parseAgentEventDetail(value);
+  if (canonical) return canonical;
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("{")) return null;
+  try {
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    const action = typeof parsed.action === "string" ? parsed.action.trim() : "";
+    if (!CAMPAIGN_LEDGER_ACTIONS.has(action)) return null;
+    return { ...parsed, action } as Partial<AgentEventDetailV1> & { action: string };
+  } catch {
+    return null;
+  }
 }
 
 function itemToken(stagedCiId: string) {

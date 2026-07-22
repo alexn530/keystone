@@ -523,7 +523,12 @@ function detailText(value: unknown) {
 }
 
 function ledgerDetailText(value: Record<string, unknown>) {
-  if (value.schema === "keystone.agent.v1") return JSON.stringify(value);
+  // Persisted Phase B3/D lifecycle records can predate the full
+  // keystone.agent.v1 envelope. Preserve action-bearing JSON so downstream
+  // readers can validate the action against their own explicit allowlists.
+  if (value.schema === "keystone.agent.v1" || (typeof value.action === "string" && value.action.trim())) {
+    return JSON.stringify(value);
+  }
   const summary = text(value.summary ?? value.detail, JSON.stringify(value));
   const metadataKeys = [
     "staged_ci_id",

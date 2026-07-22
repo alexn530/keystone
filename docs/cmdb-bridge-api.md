@@ -24,7 +24,7 @@ The current Next.js compatibility routes proxy browser calls through `/api/cmdb/
 | `/api/cmdb/ire/verify` | `/ire/verify` | POST | Identifier-only status compatibility for the correlated server-owned verification continuation; it cannot start Verify. |
 | `/api/cmdb/remediation-campaign/plan` | existing GET resources | POST | Builds a stable homogeneous, server-derived plan of at most 20 staged CIs. |
 | `/api/cmdb/remediation-campaign/simulate` | `/ire/simulate` | POST | Simulates plan items with concurrency capped at three and isolates item failures. |
-| `/api/cmdb/remediation-campaign/prepare-approval` | existing GET resources | POST | Recomputes evidence and freezes a SHA-256 manifest for eligible `UPDATE` and `NO_CHANGE` items. |
+| `/api/cmdb/remediation-campaign/prepare-approval` | existing GET resources + `/remediate` | POST | Creates missing identifier-bound deferred-review proposals, reloads authoritative evidence, and freezes a SHA-256 manifest for eligible `UPDATE` and `NO_CHANGE` items. |
 | `/api/cmdb/remediation-campaign/approve` | `/ire/approve` | POST | After the server-only safety gate is opened, recomputes the manifest and submits individual fingerprint-bound approvals sequentially. It never calls Execute or Verify. |
 | `/api/cmdb/remediation-campaign/status` | existing GET resources | POST | Reconstructs campaign execution and verification progress from persisted ServiceNow evidence. |
 
@@ -50,6 +50,12 @@ confirmation fans out into sequential calls to the existing individual
 Execute and correlated Verify. The grouped approval route is disabled unless
 the server-only `CMDB_AGENT_BATCH_APPROVAL_ENABLED=true` gate is explicitly
 opened for an authorized manifest.
+
+Manifest preparation may create a missing deferred review through the existing
+identifier-only `/remediate` proposal contract. It never approves the review or
+calls IRE. Proposal calls use deterministic campaign idempotency keys; after any
+ambiguous response the coordinator reloads ServiceNow evidence instead of
+blindly retrying.
 
 ## ServiceNow table usage
 

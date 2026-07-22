@@ -1,13 +1,14 @@
 import {
   approveRemediationCampaign,
   campaignError,
+  pendingRemediationReviewProposals,
   planRemediationCampaign,
   prepareRemediationApprovalManifest,
   remediationCampaignStatus,
   simulateRemediationCampaign,
   type CampaignSelection,
 } from "../../../../lib/cmdb/remediation-campaign";
-import { invokeCampaignIre, loadCampaignSnapshot } from "../../../../lib/cmdb/server-campaign-bridge";
+import { invokeCampaignIre, invokeCampaignProposal, loadCampaignSnapshot } from "../../../../lib/cmdb/server-campaign-bridge";
 
 const ACTIONS = new Set(["plan", "simulate", "prepare-approval", "approve", "status"]);
 const FORBIDDEN_EXECUTABLE_FIELDS = new Set([
@@ -46,7 +47,23 @@ export async function POST(request: Request, context: { params: Promise<{ action
       return Response.json(result);
     }
     if (action === "prepare-approval") {
-      return Response.json(prepareRemediationApprovalManifest(snapshot, selection));
+      const pending = pendingRemediationReviewProposals(snapshot, selection);
+      for (const item of pending) {
+        const response = await invokeCampaignProposal({
+          migration_run_id: selection.migration_run_id,
+          staged_ci_id: item.staged_ci_id,
+          finding_id: item.finding_id,
+          simulation_correlation_id: item.simulation_correlation_id,
+          simulation_fingerprint: item.simulation_fingerprint,
+          correlation_id: "ks-campaign:" + selection.campaign_id + ":prepare:" + item.staged_ci_id,
+          idempotency_key: "keystone:campaign:" + selection.campaign_id + ":prepare:" + item.staged_ci_id,
+        });
+        // Never blindly retry an ambiguous proposal response. The fresh
+        // snapshot below reconciles whether ServiceNow persisted the review.
+        if (!response.success && systemicProposalFailure(response.error?.code)) break;
+      }
+      const refreshed = pending.length ? await loadCampaignSnapshot(selection.migration_run_id) : snapshot;
+      return Response.json(prepareRemediationApprovalManifest(refreshed, selection));
     }
     if (action === "status") {
       return Response.json(remediationCampaignStatus(snapshot, selection));
@@ -71,6 +88,10 @@ export async function POST(request: Request, context: { params: Promise<{ action
     const status = code === "NOT_CONFIGURED" || code === "UPSTREAM_UNREACHABLE" ? 503 : code === "UNAUTHORIZED" ? 401 : code === "FORBIDDEN" ? 403 : code.includes("NOT_FOUND") ? 404 : 409;
     return Response.json({ error: error instanceof Error ? error.message : "Remediation campaign failed.", code }, { status });
   }
+}
+
+function systemicProposalFailure(code?: string) {
+  return ["NOT_CONFIGURED", "UNAUTHORIZED", "FORBIDDEN", "UPSTREAM_UNREACHABLE"].includes(code || "");
 }
 
 function rejectExecutableFields(incoming: Record<string, unknown>) {

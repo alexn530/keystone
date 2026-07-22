@@ -59,6 +59,34 @@ export async function invokeCampaignIre(
   }
 }
 
+export async function invokeCampaignProposal(body: Record<string, string>): Promise<IreActionResponse> {
+  const base = process.env.CMDB_API_BASE_URL?.replace(/\/$/, "");
+  const url = process.env.CMDB_REMEDIATE_URL || (base ? base + "/remediate" : null);
+  if (!url) return failedResponse("approve", "NOT_CONFIGURED", "ServiceNow remediation proposal endpoint is not configured.");
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+        ...(authorizationHeader() ? { authorization: authorizationHeader()! } : {}),
+      },
+      body: JSON.stringify({ ...body, mode: "proposal" }),
+      cache: "no-store",
+    });
+    const payload = await response.json().catch(() => ({}));
+    const normalized = normalizeIreActionResponse("approve", payload);
+    if (response.ok && normalized.success) return normalized;
+    return {
+      ...normalized,
+      success: false,
+      error: normalized.error ?? httpError(response.status, payload),
+    };
+  } catch (error) {
+    return failedResponse("approve", "UPSTREAM_UNREACHABLE", error instanceof Error ? error.message : "ServiceNow remediation proposal endpoint is unreachable.");
+  }
+}
+
 async function fetchCmdbResource(resource: typeof CAMPAIGN_READ_RESOURCES[number], migrationRunId: string) {
   const base = process.env.CMDB_API_BASE_URL?.replace(/\/$/, "");
   if (!base) throw bridgeError("NOT_CONFIGURED", "CMDB_API_BASE_URL is not configured.");

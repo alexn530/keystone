@@ -23,6 +23,7 @@ require.extensions[".ts"] = function loadTypeScript(module, filename) {
 };
 
 const campaign = require("../app/lib/cmdb/remediation-campaign.ts");
+const { normalizeComprehendTimeline } = require("../app/lib/cmdb/comprehend-adapter.ts");
 
 async function main() {
 const RUN = "e0ac4df32b82871060aefba6b891bf5b";
@@ -52,6 +53,17 @@ const mixedRunPlan = campaign.planRemediationCampaign({ ...base, cis: cis.map((c
 assert.ok(mixedRunPlan.exclusions.some(item => /different migration run/.test(item.reason)), "mixed-run records are excluded");
 const provisionalInsertPlan = campaign.planRemediationCampaign({ ...base, cis: cis.slice(0, 5).map(ci => ({ ...ci, operation: "INSERT" })) }, undefined, 20);
 assert.equal(provisionalInsertPlan.items.length, 5, "provisional INSERT records may be simulated so IRE can determine the authoritative operation");
+const legacyDetail = campaign.parseCampaignEventDetail(JSON.stringify({
+  action: "ire_simulation_completed", status: "completed", staged_ci_id: cis[0].id,
+  simulation_fingerprint: "A".repeat(64), operation: "INSERT",
+}));
+assert.equal(legacyDetail.action, "ire_simulation_completed", "deployed pre-envelope simulation evidence remains reconstructable");
+assert.equal(campaign.parseCampaignEventDetail('{"action":"untrusted_action"}'), null, "unknown legacy actions remain rejected");
+const normalizedLegacyTimeline = normalizeComprehendTimeline({ result: [{
+  sys_id: sysId(999), sequence: 1, event_name: "simulated", record_name: "Remediate",
+  detail: JSON.stringify({ action: "ire_simulation_completed", staged_ci_id: cis[0].id, operation: "INSERT" }),
+}] });
+assert.equal(JSON.parse(normalizedLegacyTimeline[0].reasoning).action, "ire_simulation_completed", "timeline normalization preserves pre-envelope lifecycle JSON");
 
 let active = 0;
 let maxActive = 0;
@@ -140,6 +152,17 @@ const missingReviewManifest = campaign.prepareRemediationApprovalManifest({ ...a
   staged_ci_ids: plan.items.map(item => item.staged_ci_id), limit: 20,
 });
 assert.ok(missingReviewManifest.items.length < manifest.items.length, "missing deferred review excludes the item");
+const pendingProposals = campaign.pendingRemediationReviewProposals({ ...approvalSnapshot, reviews: [] }, {
+  migration_run_id: RUN, work_group_signature: plan.work_group_signature, campaign_id: plan.campaign_id,
+  staged_ci_ids: plan.items.map(item => item.staged_ci_id), limit: 20,
+});
+assert.equal(pendingProposals.length, 18, "fresh UPDATE simulations without reviews become deterministic proposal requests");
+assert.ok(pendingProposals.every(item => /^[0-9A-F]{64}$/.test(item.simulation_fingerprint)));
+assert.equal(pendingProposals.some(item => item.staged_ci_id === successful[0].staged_ci_id), false, "INSERT simulations never create review proposals");
+assert.equal(campaign.pendingRemediationReviewProposals(approvalSnapshot, {
+  migration_run_id: RUN, work_group_signature: plan.work_group_signature, campaign_id: plan.campaign_id,
+  staged_ci_ids: plan.items.map(item => item.staged_ci_id), limit: 20,
+}).length, 0, "existing reviews make proposal preparation idempotent");
 
 await assert.rejects(
   campaign.approveRemediationCampaign(approvalSnapshot, {
@@ -220,6 +243,8 @@ assert.match(route, /CMDB_AGENT_BATCH_APPROVAL_ENABLED/);
 assert.equal(/invokeCampaignIre\("execute"|invokeCampaignIre\("verify"/.test(route), false, "campaign route never invokes Execute or Verify");
 assert.match(route, /FORBIDDEN_EXECUTABLE_FIELDS/);
 assert.match(route, /rejectExecutableFields\(incoming\)/);
+assert.match(route, /invokeCampaignProposal/);
+assert.match(route, /loadCampaignSnapshot\(selection\.migration_run_id\)/, "proposal preparation reloads authoritative ServiceNow evidence");
 assert.equal(/operation: item\.operation/.test(route), false, "campaign route never forwards a browser operation");
 
 const dashboard = fs.readFileSync(path.join(root, "app/cmdb-dashboard.tsx"), "utf8");
