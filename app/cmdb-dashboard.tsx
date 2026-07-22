@@ -1127,7 +1127,18 @@ function RemediateView(props: {
   const selected = queuedFix || health.fixes[0];
   const stagedCis = cis.filter(ci => ci.id || ci.stagedCiId);
   const [selectedCiId, setSelectedCiId] = useState(() => stagedCis.find(ci => ci.id === initialStagedCiId || ci.stagedCiId === initialStagedCiId)?.id ?? stagedCis[0]?.id ?? "");
-  const [ireRecords, setIreRecords] = useState<Record<string, IreWorkbenchRecord>>({});
+  const ireStorageKey = activeRunId ? `keystone.ireRecords.${activeRunId}` : "";
+  const [ireRecords, setIreRecords] = useState<Record<string, IreWorkbenchRecord>>(() => {
+    if (typeof window === "undefined" || !ireStorageKey) return {};
+    try {
+      const raw = window.localStorage.getItem(ireStorageKey);
+      return raw ? JSON.parse(raw) as Record<string, IreWorkbenchRecord> : {};
+    } catch { return {}; }
+  });
+  useEffect(() => {
+    if (typeof window === "undefined" || !ireStorageKey) return;
+    try { window.localStorage.setItem(ireStorageKey, JSON.stringify(ireRecords)); } catch {}
+  }, [ireRecords, ireStorageKey]);
   const [pendingAction, setPendingAction] = useState<"simulate" | "approve" | null>(null);
   const [campaign, setCampaign] = useState<CampaignViewState>({});
   const [campaignPending, setCampaignPending] = useState<"plan" | "simulate" | "prepare-approval" | "approve" | "status" | null>(null);
