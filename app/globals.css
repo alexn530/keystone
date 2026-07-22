@@ -107,7 +107,7 @@ button { color: inherit; }
 .eyebrow.accent { color: var(--lime); }
 .page-heading h1 { margin: 9px 0 7px; font-family: var(--display); font-size: clamp(32px, 3vw, 48px); line-height: 1.02; font-weight: 400; letter-spacing: -.035em; }
 .page-heading p { margin: 0; color: var(--muted); font-size: 13.5px; }
-.run-state { min-width: 305px; display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid var(--line); background: var(--surface); }
+.run-state { min-width: 305px; display: grid; grid-template-columns: 10px 1fr auto auto; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid var(--line); background: var(--surface); }
 .run-pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 5px rgba(89, 197, 139, .08); animation: pulseRing 2.4s ease-out infinite; }
 .run-state div { display: flex; flex-direction: column; gap: 2px; }
 .run-state small { color: var(--faint); font: 9px var(--mono); letter-spacing: .13em; }
