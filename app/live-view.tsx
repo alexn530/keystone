@@ -297,7 +297,7 @@ export function LiveOpsView({
         <button className="ghost-button" disabled={!activeRunId || refreshing} onClick={onRefresh} aria-label="Refresh Event Ledger">
           <Icon name="refresh" size={15} />{refreshing ? "Refreshing" : "Refresh"}
         </button>
-        <button className="play-button" disabled={!activeRunId} onClick={togglePaused}>
+        <button className="play-button" disabled={!activeRunId} aria-label={paused ? "Play playback" : "Pause playback"} onClick={togglePaused}>
           <Icon name={paused ? "play" : "pause"} size={15} />{paused ? "Resume" : "Pause"}
         </button>
       </div>

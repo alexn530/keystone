@@ -41,6 +41,13 @@ import {
 } from "./lib/cmdb/work-queue";
 
 import { normalizeMaraRun, type MaraRunRecord } from "./lib/cmdb/mara-audit";
+import {
+  buildPlaybackTimeline,
+  derivePlaybackNodeStates,
+  playbackNodeLabel,
+  PLAYBACK_NODES,
+  type PlaybackFrame,
+} from "./lib/cmdb/playback";
 import { isDraftRunState, isTerminalRunState, TERMINAL_RUN_STATES } from "./lib/cmdb/run-lifecycle";
 import { rememberRun, resolveActiveRun } from "./lib/cmdb/run-context";
 import { forgetRunEntry, isRunTerminal as isRegistryRunTerminal, readRegistry, rememberRunEntry, type RegistryEntry } from "./lib/cmdb/run-registry";
@@ -87,7 +94,6 @@ type IreWorkbenchRecord = {
   verification?: IreActionResponse;
 };
 
-const steps = ["Intake", "Staging", "AI read", "Confidence gate", "IRE", "CMDB", "Event log"];
 const resourceNames: ResourceName[] = ["cis", "timeline", "relationships", "health", "findings", "reviews"];
 const connectingResources: ResourceState = { cis: "connecting", timeline: "connecting", relationships: "connecting", health: "connecting", findings: "connecting", reviews: "connecting" };
 const emptyHealth: HealthData = {
@@ -513,15 +519,42 @@ export function CmdbDashboard() {
     });
   }, [activeRunId, activeRunLabel, runRecord]);
   useEffect(() => { window.scrollTo({ top: 0, behavior: "smooth" }); }, [section]);
+
+  // One deterministic playback timeline built from real run evidence. Rebuilds
+  // when the ledger or staged-record count changes; a newly polled event simply
+  // appends without disturbing the current frame (activeStep is untouched here).
+  const playbackFrames = useMemo(
+    () => buildPlaybackTimeline({ timeline, stagedCiCount: cis.length }),
+    [timeline, cis.length],
+  );
+  const frameCount = playbackFrames.length;
+  const lastFrameIndex = Math.max(0, frameCount - 1);
+  // Ref keeps the interval's frame bound fresh without re-subscribing on every
+  // poll, so exactly one interval runs and stale-closure indexes are avoided.
+  const frameCountRef = useRef(frameCount);
+  useEffect(() => { frameCountRef.current = frameCount; }, [frameCount]);
+
   useEffect(() => {
     if (!playing) return;
     const timer = window.setInterval(() => setActiveStep(current => {
-      const lastEvent = Math.max(0, timeline.length - 1);
-      if (current >= lastEvent) { setPlaying(false); return lastEvent; }
+      const last = Math.max(0, frameCountRef.current - 1);
+      if (current >= last) { setPlaying(false); return last; }
       return current + 1;
     }), 900);
     return () => window.clearInterval(timer);
-  }, [playing, timeline.length]);
+  }, [playing]);
+
+  // Keep the frame index inside the current timeline whenever it shrinks.
+  const clampedActiveStep = Math.min(activeStep, lastFrameIndex);
+
+  function stepFrame(delta: number) {
+    setPlaying(false);
+    setActiveStep(current => Math.min(Math.max(Math.min(current, lastFrameIndex) + delta, 0), lastFrameIndex));
+  }
+  function restartPlayback() {
+    setPlaying(false);
+    setActiveStep(0);
+  }
 
   const workspaceView = useMemo(() => deriveWorkspaceViewState({
     runLabel: activeRunLabel,
@@ -585,8 +618,9 @@ export function CmdbDashboard() {
   }
 
   function startPlayback() {
-    if (!timeline.length) return;
-    if (activeStep >= timeline.length - 1) setActiveStep(0);
+    if (!frameCount) return;
+    // Replaying from a finished run rewinds to the opening (staging) frame.
+    if (!playing && clampedActiveStep >= lastFrameIndex) setActiveStep(0);
     setPlaying(value => !value);
   }
 
@@ -750,7 +784,7 @@ export function CmdbDashboard() {
       />}
       {(section === "workspace" || section === "approvals") && <AgentWorkspaceView runLabel={activeRunLabel} runId={activeRunId} runState={runRecord?.state ?? ""} apiState={apiState} analysisState={analysisState} cis={cis} timeline={timeline} relationships={relationships} findings={findings} reviews={reviews} health={health} focus={section === "approvals" ? "approvals" : "overview"} onOpenPhase={phase => setSection(phase)} onOpenVerify={() => setSection("evidence")} onOpenRemediation={stagedCiId => { setRemediationTargetId(stagedCiId ?? ""); setSection("remediate"); }} onOpenEvidence={() => setSection("evidence")} onRefresh={() => void loadData(activeRunId)} />}
       {section === "evidence" && <LiveOpsView timeline={timeline} activeRunId={activeRunId} apiState={apiState} resourceStatus={resourceState.timeline} paused={livePaused} refreshing={liveRefreshing} refreshCount={liveRefreshCount} onPausedChange={setLivePaused} onRefresh={() => void refreshLiveTimeline()} />}
-      {section === "comprehend" && <ComprehendView health={health} timeline={timeline} relationships={relationships} cis={filteredCis} allCis={cis} selectedCi={selectedCi} setSelectedCi={setSelectedCi} search={search} setSearch={setSearch} filter={filter} setFilter={setFilter} playing={playing} activeStep={activeStep} startPlayback={startPlayback} setActiveStep={setActiveStep} apiState={apiState} resourceState={resourceState} activeRunId={activeRunId} runDraft={runDraft} setRunDraft={setRunDraft} loadRun={loadRunFromDraft} clearRun={() => { setRunDraft(""); openRun({ id: "", label: "" }); }} analysisState={analysisState} analysisMessage={analysisMessage} runState={runRecord?.state ?? ""} onStartAnalysis={() => activeRunId && void startComprehend(activeRunId)} />}
+      {section === "comprehend" && <ComprehendView health={health} timeline={timeline} frames={playbackFrames} relationships={relationships} cis={filteredCis} allCis={cis} selectedCi={selectedCi} setSelectedCi={setSelectedCi} search={search} setSearch={setSearch} filter={filter} setFilter={setFilter} playing={playing} activeStep={clampedActiveStep} startPlayback={startPlayback} setActiveStep={setActiveStep} onStepFrame={stepFrame} onRestartPlayback={restartPlayback} apiState={apiState} resourceState={resourceState} activeRunId={activeRunId} runDraft={runDraft} setRunDraft={setRunDraft} loadRun={loadRunFromDraft} clearRun={() => { setRunDraft(""); openRun({ id: "", label: "" }); }} analysisState={analysisState} analysisMessage={analysisMessage} runState={runRecord?.state ?? ""} onStartAnalysis={() => activeRunId && void startComprehend(activeRunId)} />}
       {section === "live" && <LiveOpsView timeline={timeline} activeRunId={activeRunId} apiState={apiState} resourceStatus={resourceState.timeline} paused={livePaused} refreshing={liveRefreshing} refreshCount={liveRefreshCount} onPausedChange={setLivePaused} onRefresh={() => void refreshLiveTimeline()} />}
       {section === "hr" && <AgentHrView timeline={timeline} timelineLive={resourceState.timeline === "live"} cis={resourceState.cis === "live" ? cis : null} activeRunId={activeRunId} />}
       {section === "prioritize" && <PrioritizeView health={health} recalculating={apiState === "connecting"} onRecalculate={() => void loadData(activeRunId)} onFix={(fix) => { setQueuedFix(fix); setActionMessage(""); setSection("remediate"); }} />}
@@ -789,23 +823,25 @@ export function CmdbDashboard() {
 }
 
 function ComprehendView(props: {
-  health: HealthData; timeline: TimelineEvent[]; relationships: Relationship[]; cis: ConfigurationItem[]; allCis: ConfigurationItem[];
+  health: HealthData; timeline: TimelineEvent[]; frames: PlaybackFrame[]; relationships: Relationship[]; cis: ConfigurationItem[]; allCis: ConfigurationItem[];
   selectedCi: ConfigurationItem | null; setSelectedCi: (ci: ConfigurationItem) => void; search: string; setSearch: (value: string) => void;
   filter: "all" | "review"; setFilter: (value: "all" | "review") => void; playing: boolean; activeStep: number;
-  startPlayback: () => void; setActiveStep: (value: number) => void; apiState: ApiState; resourceState: ResourceState;
+  startPlayback: () => void; setActiveStep: (value: number) => void; onStepFrame: (delta: number) => void; onRestartPlayback: () => void;
+  apiState: ApiState; resourceState: ResourceState;
   activeRunId: string; runDraft: string; setRunDraft: (value: string) => void; loadRun: () => void; clearRun: () => void;
   analysisState: AnalysisState; analysisMessage: string; runState: string; onStartAnalysis: () => void;
 }) {
-  const { health, timeline, relationships, cis, allCis, setSelectedCi, search, setSearch, filter, setFilter, playing, activeStep, startPlayback, setActiveStep, apiState, resourceState, activeRunId, runDraft, setRunDraft, loadRun, clearRun, analysisState, analysisMessage, runState, onStartAnalysis } = props;
+  const { health, timeline, frames, relationships, cis, allCis, setSelectedCi, search, setSearch, filter, setFilter, playing, activeStep, startPlayback, setActiveStep, onStepFrame, onRestartPlayback, apiState, resourceState, activeRunId, runDraft, setRunDraft, loadRun, clearRun, analysisState, analysisMessage, runState, onStartAnalysis } = props;
   const cisLive = resourceState.cis === "live";
-  const timelineLive = resourceState.timeline === "live";
   const cleared = cisLive
     ? allCis.filter(ci => ci.status === "live").length
     : Math.max(0, health.ciCount - health.reviewCount);
   const review = allCis.filter(ci => ci.status !== "live").length;
   const reviewRate = allCis.length ? ((review / allCis.length) * 100).toFixed(1) : "0.0";
-  const activeEvent = timeline[Math.min(activeStep, Math.max(0, timeline.length - 1))];
-  const activePhase = activeEvent?.step ?? 1;
+  const totalFrames = frames.length;
+  const frameIndex = Math.min(Math.max(activeStep, 0), Math.max(0, totalFrames - 1));
+  const activeFrame = frames[frameIndex];
+  const nodeStates = derivePlaybackNodeStates(frames, frameIndex);
   const totalEvents = timeline.length;
   // Prefer real backend signals: a failed start, then the ServiceNow run state,
   // then the transport state. Nothing here invents progress.
@@ -858,20 +894,32 @@ function ComprehendView(props: {
     <WorkerRoster timeline={timeline} />
 
     <section className="panel playback-panel" id="event-ledger">
-      <div className="panel-heading"><div><span className="section-index">01</span><div><h2>Event Ledger playback</h2><p>Replay the ordered ServiceNow audit trail without collapsing agent actions.</p></div></div><div className="playback-controls"><span>{playing ? "PLAYING" : totalEvents ? `EVENT ${activeStep + 1} / ${totalEvents}` : "NO EVENTS"}</span><button className="play-button" disabled={!totalEvents} onClick={startPlayback}><Icon name={playing ? "pause" : "play"} size={16} />{playing ? "Pause" : activeStep >= totalEvents - 1 && totalEvents ? "Replay" : "Play run"}</button></div></div>
+      <div className="panel-heading"><div><span className="section-index">01</span><div><h2>Event Ledger playback</h2><p>Replay the ordered ServiceNow audit trail without collapsing agent actions.</p></div></div><div className="playback-controls">
+        <span>{playing ? "PLAYING" : totalFrames ? `FRAME ${frameIndex + 1} / ${totalFrames}` : "NO EVENTS"}</span>
+        <button className="ghost-button playback-step playback-prev" disabled={!totalFrames || frameIndex <= 0} onClick={() => onStepFrame(-1)} aria-label="Previous frame" title="Previous frame"><Icon name="chevron" size={15} /></button>
+        <button className="play-button" disabled={!totalFrames} aria-label={playing ? "Pause playback" : "Play playback"} onClick={startPlayback}><Icon name={playing ? "pause" : "play"} size={16} />{playing ? "Pause" : frameIndex >= totalFrames - 1 && totalFrames ? "Replay" : "Play run"}</button>
+        <button className="ghost-button playback-step" disabled={!totalFrames || frameIndex >= totalFrames - 1} onClick={() => onStepFrame(1)} aria-label="Next frame" title="Next frame"><Icon name="chevron" size={15} /></button>
+        <button className="ghost-button playback-step" disabled={!totalFrames || (frameIndex === 0 && !playing)} onClick={onRestartPlayback} aria-label="Restart playback" title="Restart"><Icon name="refresh" size={15} /></button>
+      </div></div>
       <div className="stepper">
-        {steps.map((step, index) => {
-          const eventIndex = timeline.findIndex(event => event.step === index + 1);
-          const unavailable = timelineLive && eventIndex < 0;
-          const completed = eventIndex >= 0 && index < activePhase - 1;
-          return <button key={step} disabled={unavailable} title={unavailable ? `${step} has not occurred in this run` : step} className={`${completed ? "done" : ""} ${index === activePhase - 1 ? "current" : ""} ${unavailable ? "pending" : ""}`} onClick={() => { if (eventIndex >= 0) setActiveStep(eventIndex); }}>
-            <span className="step-node">{completed ? <Icon name="check" size={13} /> : index + 1}</span><span className="step-label">{step}</span>{index < 6 && <span className="step-line"><i /></span>}
+        {PLAYBACK_NODES.map((node, index) => {
+          const status = nodeStates.states[node.id];
+          const seekTo = nodeStates.firstFrameForNode[node.id];
+          const disabled = status === "untouched" || seekTo === undefined;
+          const cls = status === "active" ? "current"
+            : status === "related" ? "parallel"
+            : status === "done" ? "done"
+            : status === "untouched" ? "pending"
+            : "";
+          return <button key={node.id} disabled={disabled} title={disabled ? `${node.label} has not occurred in this run` : node.label} className={cls} onClick={() => { if (seekTo !== undefined) setActiveStep(seekTo); }}>
+            <span className="step-top"><span className="step-node">{status === "done" ? <Icon name="check" size={13} /> : index + 1}</span>{index < PLAYBACK_NODES.length - 1 && <span className="step-line"><i /></span>}</span><span className="step-label">{node.label}</span>
           </button>;
         })}
       </div>
+      {nodeStates.parallel && <div className="playback-parallel"><span className="playback-parallel-dot" aria-hidden="true" /> Parallel activity · {nodeStates.activeNodeIds.map(id => playbackNodeLabel(id)).join(" + ")}</div>}
       <div className="event-detail">
-        <div className="event-number">{String(activeEvent?.seq ?? activeStep + 1).padStart(2, "0")}</div><div className="event-copy"><span>{activeEvent?.time || "—"} · {activeEvent?.source || "Comprehend"}</span><h3>{activeEvent?.name || "No ledger event recorded"}</h3><p>{activeEvent?.reasoning || "ServiceNow returned no Event Ledger entries for this run."}</p></div>
-        <div className="event-meta"><div><small>ACTOR</small><strong>{activeEvent?.source || "—"}</strong></div><div><small>PHASE</small><strong className="lime-text">{steps[(activeEvent?.step ?? 1) - 1]}</strong></div><div><small>STATUS</small><strong>{activeEvent?.status?.replaceAll("_", " ").toUpperCase() || "PENDING"}</strong></div></div>
+        <div className="event-number">{String(activeFrame?.seq ?? frameIndex + 1).padStart(2, "0")}</div><div className="event-copy"><span>{activeFrame?.time || "—"} · {activeFrame?.actor || "Comprehend"}{activeFrame?.derived && <em className="event-derived-badge">DERIVED UI EVIDENCE</em>}</span><h3>{activeFrame?.title || "No ledger event recorded"}</h3><p>{activeFrame?.detail || "ServiceNow returned no Event Ledger entries for this run."}</p></div>
+        <div className="event-meta"><div><small>ACTOR</small><strong>{activeFrame?.actor || "—"}</strong></div><div><small>NODE</small><strong className="lime-text">{playbackNodeLabel(activeFrame?.primaryNodeId)}</strong></div><div><small>STATUS</small><strong>{(activeFrame?.status ?? "pending").replaceAll("_", " ").toUpperCase()}</strong></div></div>
       </div>
     </section>
 

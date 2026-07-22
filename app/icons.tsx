@@ -10,7 +10,7 @@ export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
     tool: <path d="M14.7 6.3a4 4 0 0 0-5-5L12 3.6 8.6 7 6.3 4.7a4 4 0 0 0 5 5L4 17.4V20h2.6l7.7-7.7a4 4 0 0 0 5-5L17 9.6 13.6 6.2 16 4z"/>,
     shield: <path d="M12 3 20 6v5c0 5.2-3.4 8.7-8 10-4.6-1.3-8-4.8-8-10V6l8-3Z"/>,
     play: <path d="m9 7 8 5-8 5V7Z" fill="currentColor"/>,
-    pause: <><path d="M9 7v10"/><path d="M15 7v10"/></>,
+    pause: <><rect x="8" y="6.5" width="3" height="11" rx="1" fill="currentColor" stroke="none"/><rect x="13" y="6.5" width="3" height="11" rx="1" fill="currentColor" stroke="none"/></>,
     search: <><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></>,
     arrow: <><path d="M5 12h14"/><path d="m14 7 5 5-5 5"/></>,
     check: <path d="m5 12 4 4L19 6"/>,
