@@ -117,8 +117,9 @@ class-alias group, one missing-identity blocker, exact `class-alias-v1` evidence
 sequential retry correlation/idempotency, and refusal after the one-retry budget
 is exhausted.
 
-Milestone 5 and Milestone 6 are complete. Milestone 7 is partially delivered
-through this bounded campaign loop. A one-item UPDATE campaign completed one
+Milestone 5, Milestone 6, and Milestone 7 are complete. The bounded campaign
+loop is live-accepted for UPDATE/NO_CHANGE, bounded INSERT, and deterministic
+failure handling. A one-item UPDATE campaign completed one
 approval, one server-owned Execute, and one correlated Verify; IRE returned
 `NO_CHANGE` and verification passed. A separate individually authorized unique
 Cloudflare CI completed a real INSERT and correlated Verify into
@@ -168,6 +169,14 @@ operation `INSERT`, and canonical fingerprint
 `02C56D74BE1C7EDFEDB527BE33C316A31A2F6FD9CB4EACD8288D73DF9D547A9C`.
 The missing-identity record remained isolated in a blocked group. No approval,
 Execute, Verify, or CMDB write was performed.
+
+The next acceptance target is Milestone 8A, not a repeat of Milestone 7. It
+must freeze a parent approval packet over multiple existing 20-record campaign
+manifests, obtain one explicit human confirmation for that exact packet, fan
+out individually auditable ServiceNow approvals, and prove one correlated
+Phase D terminal chain per successful CI. The initial packet cap is 100–200
+homogeneous records. AI planning may prepare and explain the packet but may not
+authorize it.
 
 ## CPR End-to-End Handoff Repair
 

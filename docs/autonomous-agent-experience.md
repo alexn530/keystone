@@ -170,6 +170,8 @@ Allowed without human approval:
 - request non-mutating IRE simulation;
 - compare simulation results;
 - prepare an approval-ready evidence packet.
+- compose frozen 20-record campaign manifests into a bounded parent approval
+  packet and explain aggregate risk, exclusions, and samples.
 
 Must pause:
 
@@ -180,6 +182,12 @@ Must pause:
 - policy exception;
 - stale simulation fingerprint;
 - any production CMDB mutation.
+
+At scale, pausing does not require one browser confirmation per CI. Milestone
+8A may present one human confirmation for an exact parent hash covering 100–200
+homogeneous records. That confirmation is a governance action by the user, not
+an agent tool. ServiceNow still persists and enforces an individual approval
+chain for every included CI, and Phase D remains the only execution owner.
 
 Execution remains identifier-only from the browser. ServiceNow rebuilds the authoritative payload and IRE remains the only CMDB write path.
 

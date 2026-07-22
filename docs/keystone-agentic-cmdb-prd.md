@@ -90,7 +90,8 @@ Keystone becomes meaningfully agentic when the system can continue through safe,
 - Milestone 4: Complete. The fingerprint-bound Phase D continuation is deployed and live-validated; Execute and Verify are server-owned, correlated, and exposed to the browser only as status compatibility routes.
 - Milestone 5: Complete. The single-record workbench supports simulation, fingerprint-bound approval, automatic continuation monitoring, blockers, correlations, and verification results.
 - Milestone 6: Complete. The deterministic work queue and playback state reconstruct from ServiceNow evidence after refresh.
-- Milestone 7: Repository implementation complete. Phase E adds stable homogeneous planning, three-wide simulation, deterministic failure groups, one allowlisted bounded retry, frozen manifests, and sequential individual approvals for campaigns of at most 20 CIs. Live repeated-failure acceptance remains to be captured.
+- Milestone 7: Complete and live-accepted. Phase E adds stable homogeneous planning, three-wide simulation, deterministic failure groups, one allowlisted bounded retry, frozen manifests, and sequential individual approvals for campaigns of at most 20 CIs. Live acceptance proved one resolved class-alias retry and one isolated missing-identity blocker without approval, Execute, Verify, or a CMDB write.
+- Milestone 8A: Planned. Bounded approval packets will let one explicit human confirmation authorize an exact parent hash covering several already-frozen 20-record campaign manifests. The initial packet cap is 100–200 homogeneous records; ServiceNow still records and enforces one individual approval and one Phase D continuation per CI. No model receives approval or write authority.
 
 ## 3. User Personas
 
@@ -575,7 +576,7 @@ Visible activity must be grounded. Demo fixtures are acceptable only when clearl
 
 ### Milestone 7: Deterministic Failure Grouping And Retry Loop
 
-**Status: Repository implementation complete through Phase E; live retry acceptance pending.** The bounded campaign coordinator plans stable homogeneous groups of at most 20, simulates at concurrency three, isolates item failures, classifies persisted failures into eligible, blocked, and exhausted groups, and permits exactly one sequential retry using `normalize_known_class_alias` with `class-alias-v1`. The UI exposes the failure group, investigation evidence, retry budget, mapping version, and re-simulation result. Missing identity and unsupported failures remain blocked. The coordinator also freezes a canonical SHA-256 manifest and fans one confirmation into sequential Phase D approvals. `bounded-insert-v1` admits unmatched, complete `cmdb_ci_linux_server` INSERT simulations while freezing policy and identity evidence in the manifest.
+**Status: Complete and live-accepted.** The bounded campaign coordinator plans stable homogeneous groups of at most 20, simulates at concurrency three, isolates item failures, classifies persisted failures into eligible, blocked, and exhausted groups, and permits exactly one sequential retry using `normalize_known_class_alias` with `class-alias-v1`. The UI exposes the failure group, investigation evidence, retry budget, mapping version, and re-simulation result. Missing identity and unsupported failures remain blocked. The coordinator also freezes a canonical SHA-256 manifest and fans one confirmation into sequential Phase D approvals. `bounded-insert-v1` admits unmatched, complete `cmdb_ci_linux_server` INSERT simulations while freezing policy and identity evidence in the manifest. Live run `DMR0001064` proved `CLASS_ALIAS_RETRY_AVAILABLE`, exact idempotent replay, a single successful alias retry, and an isolated `MISSING_IDENTITY` blocker.
 
 - Objective: Demonstrate that Keystone can investigate repeated IRE failures and retry with allowed strategies.
 - User-visible outcome: A set of failed simulations is grouped by shared cause; Keystone selects an allowed alternative and re-simulates.
@@ -588,6 +589,24 @@ Visible activity must be grounded. Demo fixtures are acceptable only when clearl
 - Risks: IRE errors may be too unstructured for reliable grouping.
 - Deferred: Broad retry strategy catalog and provider/model-selected explanations. Neither gains write authority.
 
+### Milestone 8A: Bounded Approval Packets
+
+**Status: Planned; this is the next implementation objective.** A packet is a
+governance envelope over several completed Phase E campaign manifests. It is
+not a larger IRE request and does not let an agent approve its own work.
+
+- Objective: Reduce hundreds of repetitive approval clicks while preserving exact, individually auditable ServiceNow enforcement.
+- User-visible outcome: Keystone prepares several homogeneous 20-record campaigns, shows aggregate risk and exclusions, and asks for one confirmation over an exact parent packet.
+- Initial bound: 100–200 records per packet, composed only from frozen campaign manifests whose combined item count remains within the configured cap.
+- Parent hash: SHA-256 over the versioned policy, run ID, deterministic ordered child manifest IDs and hashes, item counts, operation families, and expiry/freshness boundary.
+- Approval authority: A human explicitly confirms the exact packet hash and scope. The AI may explain, prioritize, simulate, and prepare the packet but cannot confirm it.
+- Execution: The server recomputes the packet and every child manifest, then fans out sequential individual ServiceNow approvals. Existing Phase D continuation alone owns one IRE Execute and one correlated Verify per CI.
+- Drift behavior: Any changed manifest, fingerprint, identity evidence, operation, policy, membership, or freshness boundary blocks that child and prevents it from inheriting authorization.
+- Failure behavior: Isolated CI failures remain isolated; ambiguous post-approval or post-IRE outcomes are reconciled from persisted evidence and never blindly retried. Systemic authorization/configuration failures halt the packet.
+- Refresh behavior: Packet, child-campaign, approval, execution, verification, and blocker progress reconstruct entirely from ServiceNow evidence.
+- Acceptance criteria: One confirmation over a frozen multi-manifest packet creates at most one individual approval chain per included CI, never invokes Execute/Verify from the packet route, and proves exact terminal Phase D correlation for every successful item.
+- Deferred: Unbounded packets, autonomous/model approval, mixed-risk packets, relationship promotion, and bypass of individual ServiceNow audit records.
+
 ### Milestone 8: Provider-Neutral Agent Harness
 
 - Objective: Add a minimal agent orchestration layer without changing authority boundaries.
@@ -596,7 +615,7 @@ Visible activity must be grounded. Demo fixtures are acceptable only when clearl
 - Frontend work: Show model reasoning summaries separately from deterministic tool results.
 - ServiceNow work: No schema changes by default; continue compact event ledger metadata.
 - Agent work: Implement Comprehend summaries, Prioritize grouping explanations, and Remediation planning for allowed actions.
-- Dependencies: Milestone 6 queue and Milestone 7 failure tools.
+- Dependencies: Milestone 6 queue, completed Milestone 7 failure tools, and the Milestone 8A packet boundary for high-volume approval UX.
 - Acceptance criteria: Agent output cannot execute without ServiceNow validation and approval checks.
 - Risks: Nondeterministic model output, overlong traces, or provider-specific coupling.
 - Deferred: Long-running background workers and production scheduling.

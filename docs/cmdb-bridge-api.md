@@ -87,6 +87,33 @@ any real `name`, host, FQDN, IP, MAC, serial, or asset tag record
 `MISSING_IDENTITY`. The staging transport identifier is not treated as CMDB
 identity evidence.
 
+## Planned Milestone 8A approval-packet contract
+
+The next API layer will compose several already-frozen Phase E manifests into
+one bounded approval packet. It must not replace or weaken the individual
+campaign and Phase D contracts. Proposed server-only actions are
+`plan-packet`, `prepare-packet`, `approve-packet`, and `packet-status`.
+
+Browser input is limited to the run ID, packet ID, parent packet hash, child
+manifest IDs, and staged-record identifiers. Child classes, mappings,
+operations, fingerprints, identity evidence, payloads, and CMDB values remain
+server-derived. The initial packet cap is 100–200 homogeneous records, while
+each child campaign retains its 20-record cap.
+
+The parent SHA-256 hash binds a versioned packet policy, migration run,
+deterministically ordered child manifest IDs and hashes, child item counts,
+operation families, and a freshness/expiry boundary. Before approval, the
+server recomputes the parent packet and every child manifest. Drift in
+membership, fingerprint, identity, operation, policy, or freshness blocks the
+affected scope.
+
+One human confirmation may fan out to sequential individual `/ire/approve`
+calls. The packet route never calls Execute or Verify; the existing Phase D
+continuation still owns at most one IRE operation and one correlated Verify per
+CI. The AI may plan, simulate, prioritize, explain, and prepare packets, but it
+cannot confirm approval or gain write authority. Ambiguous outcomes are
+reconciled from persisted ServiceNow evidence and are never blindly retried.
+
 ## ServiceNow table usage
 
 The lifecycle bridge uses the original six tables from `docs/servicenow-schema-inventory.md`:
