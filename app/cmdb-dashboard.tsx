@@ -94,6 +94,7 @@ type ResourceName = "cis" | "timeline" | "relationships" | "health" | "findings"
 type ResourceStatus = "connecting" | "live" | "unavailable" | "error";
 type ResourceState = Record<ResourceName, ResourceStatus>;
 type Section = "import" | "runs" | "summaries" | "workspace" | "approvals" | "evidence" | "comprehend" | "live" | "hr" | "prioritize" | "remediate";
+const validSections = new Set<string>(["import", "runs", "summaries", "workspace", "approvals", "evidence", "comprehend", "live", "hr", "prioritize", "remediate"]);
 type IreWorkbenchRecord = {
   simulation?: IreActionResponse;
   approval?: IreActionResponse;
@@ -255,6 +256,10 @@ export function CmdbDashboard() {
   useEffect(() => {
     const restoredRun = currentRunFromLocation();
     if (!restoredRun) return;
+    const registry = readRegistry();
+    const entry = registry.find(e => e.id === restoredRun.toLowerCase());
+    const label = entry?.summary?.trim() || entry?.label?.trim() || ("RUN-" + restoredRun.slice(0, 8).toUpperCase());
+    const savedSection = typeof window !== "undefined" ? window.localStorage.getItem("keystone.section") : null;
     const timer = window.setTimeout(() => {
       setCis([]);
       setTimeline([]);
@@ -263,9 +268,9 @@ export function CmdbDashboard() {
       setFindings([]);
       setReviews([]);
       setActiveRunId(restoredRun);
-      setActiveRunLabel("RUN-" + restoredRun.slice(0, 8).toUpperCase());
+      setActiveRunLabel(label);
       setRunDraft(restoredRun);
-      setSection("workspace");
+      setSection(savedSection && validSections.has(savedSection) ? savedSection as Section : "workspace");
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
@@ -536,6 +541,9 @@ export function CmdbDashboard() {
     });
   }, [activeRunId, activeRunLabel, runRecord]);
   useEffect(() => { window.scrollTo({ top: 0, behavior: "smooth" }); }, [section]);
+  useEffect(() => {
+    try { window.localStorage.setItem("keystone.section", section); } catch {}
+  }, [section]);
 
   // One deterministic playback timeline built from real run evidence. Rebuilds
   // when the ledger or staged-record count changes; a newly polled event simply
@@ -597,7 +605,8 @@ export function CmdbDashboard() {
   // "Start analysis" button in ComprehendView, which calls `startComprehend`.
   function openRun(run?: ImportedRun) {
     const runId = run ? run.id.trim() : activeRunId;
-    const label = run?.label?.trim() || (runId ? `RUN-${runId.slice(0, 8).toUpperCase()}` : "");
+    const registryEntry = readRegistry().find(e => e.id === runId.toLowerCase());
+    const label = run?.label?.trim() || registryEntry?.summary?.trim() || registryEntry?.label?.trim() || (runId ? `RUN-${runId.slice(0, 8).toUpperCase()}` : "");
     const changed = runId !== activeRunId;
     if (changed) {
       setRunRecord(null);
