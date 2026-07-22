@@ -2,9 +2,14 @@
 
 ## Document Control
 
-**Date:** 2026-07-19  
-**Purpose:** Central product requirements document for Keystone's agentic CMDB migration experience.  
-**Companion architecture document:** `docs/keystone-technical-stack.md`  
+**Date:** 2026-07-19
+
+**Last progression update:** 2026-07-22
+
+**Purpose:** Central product requirements document for Keystone's agentic CMDB migration experience.
+
+**Companion architecture document:** `docs/keystone-technical-stack.md`
+
 **Non-negotiable rule:** ServiceNow remains authoritative for governed CMDB mutation; Keystone must not write directly to `cmdb_ci*` or `cmdb_rel_ci`.
 
 ## 1. Executive Summary
@@ -22,10 +27,10 @@ Keystone becomes meaningfully agentic when the system can continue through safe,
 ### Implemented Capabilities
 
 - The repository is a Next.js application with a single-page CMDB control surface in `app/cmdb-dashboard.tsx`.
-- The application has six primary views: import, comprehend, live, HR, prioritize, and remediate. These views are composed from `app/import-view.tsx`, `app/live-view.tsx`, `app/hr-view.tsx`, `app/agents-data.ts`, and dashboard-local components.
+- The application exposes Import, Runs Queue, Past Summaries, Agent Workspace, Approvals, Comprehend, Prioritize, Remediate, Verify, and AI Usage surfaces.
 - The app can read ServiceNow bridge resources through compatibility routes in `app/api/cmdb/[resource]/route.ts` for `cis`, `timeline`, `relationships`, and `health`.
 - The app can submit import payloads to the ServiceNow bridge through `POST /api/cmdb/import`, preserving the safety posture that imports target staging rather than direct CMDB writes.
-- The app can submit remediation proposals through `POST /api/cmdb/remediate`. This is still a proposal path, not an IRE execution path.
+- The app can submit identifier-only remediation proposals through `POST /api/cmdb/remediate`. That path may create or bind review evidence but is not an IRE execution path.
 - Milestone 4 added a proxy route in `app/api/cmdb/ire/[action]/route.ts` for `simulate`, `approve`, `execute`, and `verify`.
 - The IRE proxy is intentionally identifier-only. It forwards `migration_run_id`, `staged_ci_id`, correlation/idempotency metadata, and action-specific approval or correlation fields. It does not forward final class, operation, target CI, CMDB values, or authoritative IRE payloads.
 - Server-side ServiceNow credentials are configured through `.env.example` and described in `README.md`. Credentials remain server-side.
@@ -33,6 +38,10 @@ Keystone becomes meaningfully agentic when the system can continue through safe,
 - `app/lib/cmdb/ire.ts` defines TypeScript contracts and preview helpers for the single-record IRE flow. Execution previews are explicitly rejected by validation because the browser must not authorize or submit executable payloads.
 - `app/lib/cmdb/import-staging.ts` provides browser-side parsing and preview normalization for CSV and JSON imports.
 - `app/lib/cmdb/comprehend-adapter.ts` maps live ServiceNow bridge data into the UI's current CI, relationship, timeline, and health shapes.
+- The Agent Workspace derives its queue, lifecycle chapters, Mara summaries, blockers, and verification outcomes from current ServiceNow resources and Event Ledger evidence.
+- Phase E campaigns plan homogeneous groups of at most 20, simulate at concurrency three, freeze canonical manifests, isolate failures, and fan one confirmation into sequential individual ServiceNow approvals.
+- Milestone 8A packets compose at most five existing child manifests and 100 homogeneous records behind an exact server-only parent-hash gate. Packet routes never call Execute or Verify.
+- Agent Workspace can present a verified subset while explicitly deferring remaining work. That presentation state is local, non-authoritative, and states that ServiceNow was not changed for deferred records.
 - `docs/system-architecture.md`, `docs/servicenow-schema-inventory.md`, `docs/servicenow-field-gap-matrix.md`, `docs/cmdb-bridge-api.md`, `docs/ire-flow.md`, and `docs/agent-harness.md` establish the core architecture and governance boundaries.
 - Git history shows recent milestones focused on real ServiceNow-backed event semantics and the single-record IRE proxy contract. The latest reviewed commit before this PRD work is `6a4a562 Add single-record IRE proxy contract`.
 
@@ -40,11 +49,11 @@ Keystone becomes meaningfully agentic when the system can continue through safe,
 
 - Comprehend is partially represented by UI adapters, ServiceNow-backed staged outcomes, timeline events, findings, confidence indicators, and provenance views. It is not yet an autonomous Comprehend agent running from this repository.
 - Prioritize is partially represented by health/fix data, priority display, relationship and confidence context, and recalculation by reloading ServiceNow-backed data. It is not yet a deterministic prioritization engine plus agent planner.
-- Remediate is partially represented by tool cards, proposal submission, IRE route contracts, and the ServiceNow-backed Milestone 4 endpoint design. It is not yet a full single-record simulate/approve/execute/verify UI workflow.
+- Remediate now provides single-record and bounded campaign/packet workflows. Broader automatic progression across multiple heterogeneous groups remains operator-driven.
 - Live Ops is partially real: `app/live-view.tsx` consumes the real timeline/event ledger data and avoids fake timers. It is still a visualization of events, not an orchestrator.
 - Agent HR is a useful narrative and persona surface, but it is static data in `app/agents-data.ts`, not runtime agent telemetry.
-- The IRE control loop has frontend proxy contracts and ServiceNow endpoint assumptions, but the main browser workflow has not yet been wired to those new `/api/cmdb/ire/*` routes.
-- ServiceNow endpoint deployment was reported externally, but this repository does not contain the ServiceNow update set or automated integration tests proving those endpoint response shapes.
+- The IRE control loop is wired to the browser workbench. Execute and Verify browser routes are status-only; the ServiceNow-owned Phase D continuation performs both operations.
+- Source-controlled ServiceNow artifacts and project-owned Phase B3A, B3B, C, and D acceptance suites cover the deployed endpoint and continuation contracts.
 
 ### Mocked Capabilities
 
@@ -61,7 +70,7 @@ Keystone becomes meaningfully agentic when the system can continue through safe,
 - No autonomous Comprehend, Prioritize, or Remediation loop exists in this repository.
 - The frontend single-record IRE workbench supports simulation, approval, and automatic Execute/Verify monitoring.
 - Deterministic failure grouping and a one-attempt class-alias retry loop now exist; broader strategies remain deferred.
-- No batch simulation or relationship promotion flow exists.
+- Relationship promotion remains deferred; endpoint CIs must be verified first.
 - Project-owned smoke and acceptance harnesses cover campaign orchestration, work queues, playback, ServiceNow Phase C/D contracts, idempotency, stale fingerprints, and verification correlation; a conventional unit-test runner remains open.
 - Source-controlled ServiceNow Script Includes, Scripted REST resources, Script Actions, and export tooling are present; deployment still requires controlled promotion into the instance.
 - No durable observability layer exists for detailed agent traces outside compact ServiceNow event ledger metadata.
@@ -78,9 +87,9 @@ Keystone becomes meaningfully agentic when the system can continue through safe,
 ### Documentation And Code Discrepancies
 
 - The docs correctly define ServiceNow as authoritative, but the UI still presents some agent-oriented experiences from static and derived data.
-- `docs/ire-flow.md` and `docs/cmdb-bridge-api.md` describe the Milestone 4 IRE flow, while `app/cmdb-dashboard.tsx` does not yet expose the complete IRE lifecycle to the user.
-- `docs/agent-harness.md` describes a conceptual agent harness boundary. No provider implementation, work queue, or model orchestration is implemented.
-- `README.md` describes the app as a neutral unnamed frontend in some places while the product direction is Keystone as an AI-powered operations center.
+- Past Summaries currently counts staged operation types and can overstate committed outcomes. Agent Workspace Chapter 4 and correlated Phase D verification are authoritative for live demonstrations.
+- ServiceNow's health endpoint does not expose historical baseline, verified, and projected fields for the active demo run. Agent Workspace therefore labels its health progression as derived rather than reported.
+- `docs/agent-harness.md` remains the provider-neutral authority boundary; deterministic queue and ServiceNow Mara evidence exist, while a general repository-owned provider adapter remains deferred.
 
 ### Milestone Status
 
@@ -92,6 +101,12 @@ Keystone becomes meaningfully agentic when the system can continue through safe,
 - Milestone 6: Complete. The deterministic work queue and playback state reconstruct from ServiceNow evidence after refresh.
 - Milestone 7: Complete and live-accepted. Phase E adds stable homogeneous planning, three-wide simulation, deterministic failure groups, one allowlisted bounded retry, frozen manifests, and sequential individual approvals for campaigns of at most 20 CIs. Live acceptance proved one resolved class-alias retry and one isolated missing-identity blocker without approval, Execute, Verify, or a CMDB write.
 - Milestone 8A: Complete and live-accepted. Bounded approval packets let one explicit human confirmation authorize an exact parent hash covering up to five already-frozen 20-record campaign manifests and 100 homogeneous records. ServiceNow still records and enforces one individual approval and one Phase D continuation per CI. Live acceptance proved one exact-hash `INSERT` through correlated verification with the packet route invoking neither Execute nor Verify. No model receives approval or write authority.
+
+The active same-day demo run `DMR0001066` is in progress rather than terminal:
+20 of 50 Linux-server INSERT candidates have correlated ServiceNow verification,
+14 await review, and 16 remain ready to simulate. A read-only packet plan
+currently selects the next homogeneous 13-record slice. Full-run acceptance is
+pending 50 verified target bindings and zero remaining lifecycle work.
 
 ## 3. User Personas
 
@@ -635,22 +650,41 @@ not a larger IRE request and does not let an agent approve its own work.
 
 ## 16. Demo Narrative
 
-1. User selects or uploads a realistic migration dataset containing servers, applications, databases, endpoint metadata, relationships, and dirty data.
-2. Keystone stages the data in ServiceNow and opens the migration run.
-3. Comprehend Agent activity appears from real staged records and event ledger entries: source structure detected, records normalized, classes proposed, duplicate candidates identified, and relationship graph built.
-4. Prioritize Agent groups repeated problems: missing serials, hostname collisions, unsupported class aliases, malformed CIDRs, and orphan relationships.
-5. Remediation Agent selects simulation-ready server records and prepares non-authoritative previews.
-6. Keystone calls ServiceNow IRE simulation for selected staged CIs.
-7. A group of simulations fails because hostname is not unique.
-8. The agent investigates the shared failure pattern and selects BIOS UUID as an allowed alternative identifier for the affected records.
-9. Keystone requests rebuilt simulations through ServiceNow; most records pass.
-10. One or two operations require meaningful administrator approval because of low confidence, duplicate candidate ambiguity, or protected service impact.
-11. The user approves one action from the Keystone workbench.
-12. Keystone executes the approved operation through ServiceNow IRE using an identifier-only request.
-13. ServiceNow verifies the resulting CI using the execution correlation ID.
-14. Keystone summarizes the actual result, remaining blocked work, and the next safe item.
+The live narrative must follow `docs/live-demo-runbook.md` and distinguish
+persisted evidence from projections:
 
-For the current repository, steps 1-4 are partially supported by staging, adapters, live timeline, and mock/demo fallback. Steps 5-13 require the next implementation milestone to wire the UI to the deployed IRE endpoints and derive the work queue. Any demo event not backed by live ServiceNow data must be clearly labeled as fixture-driven.
+1. Import a realistic dataset into ServiceNow staging; explain that staging is
+   quarantine and not a direct CMDB write.
+2. Open the returned migration run and show live ServiceNow instance/run
+   identity.
+3. Comprehend displays real staged records, normalized identity/class evidence,
+   findings, and Event Ledger activity.
+4. Prioritize displays deterministic work groups and projected health lift.
+5. Remediate selects one homogeneous group and requests non-mutating ServiceNow
+   IRE simulations, capped at concurrency three.
+6. Eligible failures may consume exactly one allowlisted class-alias retry;
+   missing identity and unsupported failures remain blocked.
+7. Keystone plans and prepares bounded child manifests and one parent packet
+   without approving, executing, or verifying any record.
+8. The user reviews the complete membership, exclusions, samples, operation
+   family, risk summary, expiry, and full parent hash.
+9. The operator separately authorizes that exact fresh packet hash through the
+   server-only gate.
+10. One UI confirmation fans out sequential individual ServiceNow approvals.
+11. Existing Phase D claims each approved chain, performs one server-owned IRE
+    execution, and verifies only the returned target using exact correlation.
+12. Agent Workspace refreshes from ServiceNow evidence and Mara summarizes
+    verified operations, target CIs, blockers, and deferred work.
+13. Baseline, verified-now, and projected health are shown with an explicit
+    `reported` or `derived` source label.
+14. The process repeats for additional homogeneous groups until the intended
+    demo scope has zero pending lifecycle work.
+
+For the active run, 20 records currently satisfy step 12 and 30 remain. The
+presentation-only completed-results control may showcase those 20 while
+disclosing the 30 deferred records, but it is not full-run completion. Any
+fixture event must be clearly labeled fixture-only, and Past Summaries staged
+operation totals must not be used as proof of committed records.
 
 ## 17. Risks And Tradeoffs
 
@@ -683,21 +717,36 @@ For the current repository, steps 1-4 are partially supported by staging, adapte
 
 ### Does The Current Architecture Support The Vision?
 
-Yes, with important gaps. The current architecture has the right authority boundary: ServiceNow owns staging, findings, reviews, event ledger, IRE simulation, execution, and verification, while Keystone owns the user experience and safe proxy/tool surface. The six-table schema is enough for the hackathon if lifecycle state is derived from event ledger, findings, review decisions, and IRE metadata. The main missing piece is not architecture; it is orchestration and UX: Keystone needs a real workbench that connects live staged records to the Milestone 4 IRE loop and then to a constrained agent tool layer.
+Yes. The core governed vertical slice is implemented and live-accepted:
+ServiceNow owns staging, findings, reviews, Event Ledger, simulation, approval,
+IRE execution, and verification; Keystone owns the evidence-backed user
+experience and bounded identifier-only orchestration. The immediate risk is no
+longer missing architecture. It is completing and rehearsing the live dataset,
+keeping every packet fresh and exactly authorized, and ensuring summary views
+do not overstate staged operations as verified commits.
 
 ### Five Most Important Changes Required
 
-1. Build the single-record IRE workbench in the UI and wire it to `/api/cmdb/ire/simulate`, `/approve`, `/execute`, and `/verify`.
-2. Add a derived work queue from staged records, findings, review decisions, and event ledger entries.
-3. Add deterministic eligibility, grouping, and failure-classification logic before introducing model-driven planning.
-4. Replace static agent claims with event-backed activity for active migration runs.
-5. Add route-level and adapter-level tests for IRE request sanitization, lifecycle derivation, missing config, stale simulation, idempotency, and verification correlation.
+1. Complete the remaining simulations and exact-hash packet approvals for the
+   active 50-record demo run.
+2. Change Past Summaries to count correlated verified outcomes rather than
+   staged operation types.
+3. Add a terminal live-demo acceptance check requiring zero pending work and
+   exact target-CI bindings after refresh.
+4. Rehearse exact-hash expiry, restart, systemic-stop, and ambiguous-response
+   recovery before presenting.
+5. Preserve and extend the existing route, campaign, packet, Phase D, and
+   browser regression gates as the demo workflow evolves.
 
 ### Highest-Impact Achievable Hackathon Scope
 
-The best hackathon target is a single-record-to-small-batch remediation loop: upload or select a realistic run, show Comprehend/Prioritize activity from staged data, select eligible work, simulate through ServiceNow IRE, group one repeated failure, retry with an allowed deterministic strategy, request approval for one meaningful action, execute through IRE, verify the result, and summarize remaining work.
-
-This proves the product thesis better than broad autonomous claims because it shows actual governed work moving through ServiceNow.
+The highest-impact achievable scope is now a real 50-record homogeneous
+ServiceNow migration with visible staging, deterministic analysis, bounded
+simulation, one exact packet authorization at a time, sequential individual
+approvals, Phase D execution, and correlated verification. If the entire run
+cannot reach terminal evidence before presentation, the truthful fallback is
+the already verified 20-record slice plus an explicitly labeled fixture-only
+100-record packet demonstration.
 
 ### Features To Reject Or Defer
 
@@ -713,20 +762,22 @@ This proves the product thesis better than broad autonomous claims because it sh
 ### Recommended Next Codex Implementation Prompt
 
 ```text
-Implement Keystone Milestone 5: Single-Record Remediation Workbench.
+Prepare Keystone for the live 50-CI demo.
 
-Read docs/keystone-agentic-cmdb-prd.md, docs/ire-flow.md, docs/cmdb-bridge-api.md, app/api/cmdb/ire/[action]/route.ts, app/lib/cmdb/ire.ts, app/cmdb-dashboard.tsx, and app/lib/cmdb/comprehend-adapter.ts.
+Read docs/live-demo-runbook.md, docs/next-session-handoff.md,
+docs/lifecycle-acceptance-report.md, docs/ire-flow.md, and
+docs/cmdb-bridge-api.md completely.
 
-Add a user-facing single-staged-CI IRE workbench that:
-- selects a staged CI from the active migration run;
-- calls /api/cmdb/ire/simulate with identifiers, correlation_id, and idempotency_key;
-- displays simulation result, actionable finding, fingerprint/freshness metadata, and blockers;
-- calls /api/cmdb/ire/approve for one actionable finding without duplicating findings;
-- calls /api/cmdb/ire/execute with identifiers only, including simulation_correlation_id and execution idempotency metadata;
-- calls /api/cmdb/ire/verify tied to the execution_correlation_id;
-- shows derived lifecycle states and event-ledger playback;
-- prevents double-click duplicate execution in the browser while relying on ServiceNow for authoritative idempotency;
-- never sends final operation, target class, target CI, CMDB values, or authoritative IRE payload from the browser.
+First, fix Past Summaries so operation totals are derived only from correlated
+verified outcomes, with pending and deferred work shown separately. Add a
+terminal demo readiness check for the active run that requires exact verified
+target bindings and zero awaiting-approval, ready-to-simulate, executing,
+blocked, or reconciliation-required records after refresh.
 
-Preserve existing /api/cmdb/* compatibility routes. Do not add ServiceNow fields or tables. Run npm run build and npm run lint. Add focused tests for request sanitization and lifecycle derivation if the repository test setup allows it.
+Preserve the server-only exact packet-hash gate, sequential individual
+ServiceNow approvals, status-only browser Execute/Verify routes, and Phase D as
+the only IRE execution and verification owner. Add no ServiceNow schema or
+direct CMDB write path. Run the campaign, packet, queue, playback, Phase A-D,
+TypeScript, lint, and production-build gates before declaring the run demo
+ready.
 ```

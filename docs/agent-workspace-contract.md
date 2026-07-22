@@ -53,6 +53,50 @@ failure stops the loop.
 The manual Execute and Verify controls remain an advanced recovery surface, not
 the normal workspace path.
 
+## Bounded Packet Handoff
+
+When Remediate is paused for approval, Agent Workspace may route the user to
+`Review next bounded packet`. That control may trigger only the existing
+identifier-only packet preparation flow for the active migration run. It does
+not carry browser-derived class, operation, strategy, mapping, fingerprint,
+policy, payload, or CMDB values.
+
+Packet preparation may create missing deferred reviews and freeze eligible
+fresh child manifests. It never approves, executes, verifies, or initiates
+simulation. Approval remains locked until the complete recomputed parent hash
+exactly matches the server-only `CMDB_AGENT_APPROVAL_PACKET_HASH` value.
+
+## Presentation-Only Completion
+
+`View completed results` is a local presentation state. It may advance the
+visible story to Verify while pending records remain, but it must:
+
+- disclose verified and deferred counts;
+- state that ServiceNow was not changed for deferred work;
+- preserve the real queue and ServiceNow evidence;
+- offer a route back to the remaining work; and
+- never reject reviews, approve records, execute IRE, or persist a false run
+  completion state.
+
+A refresh reconstructs the authoritative queue from ServiceNow. The
+presentation state is not an approval, lifecycle event, or source of truth.
+
+## Verification Summary And Health Progression
+
+Verify summarizes only correlated ServiceNow outcomes: verified count,
+`INSERT`/`UPDATE`/`NO_CHANGE` counts, target CI bindings, blockers, and class
+counts. Pending or deferred work remains separately disclosed.
+
+When the health resource reports baseline, verified, and projected scores,
+Agent Workspace labels them as reported. When those historical fields are
+absent, the UI may derive a labeled progression from average staged-CI health,
+realized work-group lift, and remaining work-group lift. Derived projected
+health is an opportunity estimate, not proof of a completed CMDB mutation.
+
+Past Summaries currently uses staged operation totals and is not authoritative
+for committed counts. Use Agent Workspace Chapter 4 and exact Phase D
+verification evidence for live acceptance.
+
 ## ServiceNow Integration Gate
 
 Before deployment, integrate these source-controlled services with the existing

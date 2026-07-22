@@ -1,6 +1,9 @@
-# CMDB Modernization Control Plane
+# Keystone CMDB Modernization Control Plane
 
-A neutral, unnamed frontend for comprehending, prioritizing, and remediating CMDB migration runs. The dashboard reads four JSON resources and sends remediation proposals through an IRE-governed server route.
+Keystone is a governed CMDB migration operations center for comprehending,
+prioritizing, remediating, approving, and verifying ServiceNow migration runs.
+ServiceNow remains the workflow and CMDB authority, and IRE remains the only CI
+write path.
 
 ## Local development
 
@@ -13,6 +16,34 @@ npm run dev
 Open `http://localhost:3000`.
 
 If the API variables are not configured, the dashboard automatically uses its built-in demo snapshot.
+
+For a real ServiceNow-backed presentation, follow
+[`docs/live-demo-runbook.md`](docs/live-demo-runbook.md). Do not present the
+fixture fallback or the presentation-only completed-results view as a live
+CMDB commit.
+
+## Current live-demo checkpoint
+
+As of 2026-07-22, run `DMR0001066`
+(`31b134742b96875060aefba6b891bfcb`) has 20 correlated, verified ServiceNow
+INSERTs from 50 staged Linux-server candidates. Fourteen records await review
+and 16 remain ready for simulation. The next read-only packet plan selects 13
+homogeneous records. A full 50-CI claim is not valid until ServiceNow evidence
+reports 50 verified targets and zero pending, ready, executing, blocked, or
+reconciliation-required records.
+
+The server-side packet hash gate is intentionally single-use. Leave
+`CMDB_AGENT_APPROVAL_PACKET_HASH` empty until an operator separately authorizes
+the exact freshly prepared packet hash.
+
+## Fixture-only approval packet demo
+
+```bash
+npm run demo:approval-packet
+```
+
+This loopback fixture demonstrates the bounded-packet UI without reaching
+ServiceNow. It must not be described as a live CMDB migration.
 
 ## API configuration
 
@@ -37,6 +68,7 @@ CMDB_IRE_SIMULATE_URL=
 CMDB_IRE_APPROVE_URL=
 CMDB_IRE_EXECUTE_URL=
 CMDB_IRE_VERIFY_URL=
+CMDB_AGENT_APPROVAL_PACKET_HASH=
 ```
 
 Use either a bearer token or basic authentication. These credentials are only read by Next.js server routes and are never sent to the browser.

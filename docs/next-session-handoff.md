@@ -15,6 +15,39 @@ The working contract and endpoint details are in `docs/cmdb-bridge-api.md`.
 The product roadmap is in `docs/keystone-agentic-cmdb-prd.md`. Live evidence is
 in `docs/lifecycle-acceptance-report.md`.
 
+Commit `392ec7f` adds the current Agent Workspace demo story: direct bounded
+packet review from the Remediate pause, a presentation-only completed-results
+path with explicit deferred counts, Mara's correlated verification summary,
+and labeled baseline -> verified -> projected health. The same health-rail
+layout is used in Past Summaries, but Past Summaries operation totals remain a
+known staged-operation projection and must not be cited as committed evidence.
+
+## Same-day live-demo checkpoint
+
+The active live run is `DMR0001066`
+(`31b134742b96875060aefba6b891bfcb`) with 50 staged
+`cmdb_ci_linux_server` INSERT candidates. Current ServiceNow-backed Agent
+Workspace evidence reports:
+
+- 20 correlated verifications passed;
+- 20 verified INSERT target CIs;
+- 14 records awaiting review;
+- 16 records ready to simulate;
+- 0 executing and 0 blocked; and
+- derived health progression `85 -> 87.3 -> 96`, explicitly labeled as
+  derived because the health endpoint does not report historical score fields.
+
+A read-only `plan-packet` call currently selects the next homogeneous slice of
+13 simulated INSERT records. `approval_enabled` is false until the exact fresh
+packet hash is separately authorized through the server-only environment gate.
+The remaining records have not been committed merely because the UI can show
+completed results.
+
+Follow `docs/live-demo-runbook.md` for the live sequence and stop conditions.
+A truthful full-run claim requires 50 verified target bindings and zero
+awaiting-review, ready-to-simulate, executing, blocked, or reconciliation-
+required records after refresh.
+
 ## Completed live acceptance
 
 - Five distinct bounded INSERTs from run `065821a42b1e835060aefba6b891bf53`
@@ -89,6 +122,9 @@ hash, and marks the panel as demo mode. The fixture emulates individual
 approval and Phase D ledger evidence; it does not reach ServiceNow or a CMDB.
 The production exact-hash authorization and all ServiceNow/Phase D authority
 boundaries remain unchanged.
+
+This fixture is the fallback presentation, not the preferred live demo. The
+preferred same-day path is the active ServiceNow run described above.
 
 ## Completed live packet acceptance sequence
 

@@ -222,6 +222,47 @@ This is repository/demo evidence only. The launcher removes inherited
 sent no ServiceNow approval, Execute, Verify, or CMDB write. Live fan-out still
 requires separate authorization naming the exact fresh production packet hash.
 
+## Current Live Demo Progression — 2026-07-22
+
+The current same-day demo run is ServiceNow migration run `DMR0001066`
+(`31b134742b96875060aefba6b891bfcb`). This checkpoint is a progress report,
+not terminal acceptance for all 50 records.
+
+GET-backed Agent Workspace evidence currently reconstructs:
+
+| State | Count |
+|---|---:|
+| Staged `cmdb_ci_linux_server` INSERT candidates | 50 |
+| Correlated verification passed | 20 |
+| Verified INSERT target bindings | 20 |
+| Awaiting review | 14 |
+| Ready to simulate | 16 |
+| Executing | 0 |
+| Blocked | 0 |
+
+A read-only `plan-packet` request returned packet ID
+`2B8E91AA395698EBF848A02E`, one 13-record homogeneous child, no deferred
+members in that selected group, and `approval_enabled: false`. The remaining
+records were not approved or mutated by that check. Packet approval still
+requires a separately authorized exact fresh parent hash.
+
+Agent Workspace Chapter 4 reports 20 verified ServiceNow read-backs, 20
+INSERTs, 20 target CIs, and zero blockers. It also displays derived health
+`85 -> 87.3 -> 96` with `+2.3` realized and `+8.7` remaining. This health
+progression is explicitly labeled as derived from staged CI health plus
+realized and remaining work-group lift; it is not represented as a historical
+ServiceNow health series.
+
+The presentation-only completed-results route was browser-validated. It shows
+20 verified and 30 deferred while stating that ServiceNow was not changed for
+the deferred records. It does not alter reviews or lifecycle evidence.
+
+Terminal acceptance for the full dataset remains pending. It requires 50
+verified target bindings, zero pending lifecycle work, and identical counts
+after a GET-backed refresh. Past Summaries currently counts staged operation
+types and must not be used as committed-record evidence until its derivation is
+changed to verified outcomes.
+
 ## CPR End-to-End Handoff Repair
 
 A GET-only trace of stress run `065821a42b1e835060aefba6b891bf53`
