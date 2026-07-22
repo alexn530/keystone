@@ -20,7 +20,7 @@ export type JourneyPause = {
 export type JourneyEvidence =
   | { kind: "comprehend"; staged: number; ready: number; held: number }
   | { kind: "prioritize"; totalGroups: number; topGroups: AgentWorkGroup[] }
-  | { kind: "remediate"; approvals: WorkQueueItem[]; executing: number; verified: number; totalApprovals: number }
+  | { kind: "remediate"; approvals: WorkQueueItem[]; executing: number; verified: number; totalApprovals: number; readyToSimulate: number }
   | {
       kind: "verify";
       baseline: number | null;
@@ -32,6 +32,12 @@ export type JourneyEvidence =
       relationshipsTotal: number;
       verifiedCount: number;
       groupsResolved: number;
+      targetCount: number;
+      pendingCount: number;
+      blockedCount: number;
+      operationCounts: { insert: number; update: number; noChange: number };
+      classCounts: { className: string; count: number }[];
+      healthSource: WorkspaceViewState["health"]["source"];
     };
 
 export type JourneyChapter = {
@@ -72,6 +78,39 @@ export function deriveRunJourney(view: WorkspaceViewState): RunJourney {
     headline: view.mara.headline,
     narration: view.mara.message,
     summary: buildSummaryLine(view),
+  };
+}
+
+/**
+ * Presentation-only completion view. This never changes queue evidence or
+ * ServiceNow state; it lets a demo continue to the verified-results chapter
+ * while preserving an honest count of work deferred for later.
+ */
+export function deriveDeferredPresentation(journey: RunJourney, view: WorkspaceViewState): RunJourney {
+  const verified = view.queue.items.filter(item => item.bucket === "verified").length;
+  const deferred = view.approvalCount + view.readyToSimulateCount + view.heldCount;
+  const deferredSummary = `${plural(verified, "record")} verified · ${plural(deferred, "record")} deferred for later.`;
+
+  return {
+    ...journey,
+    activeChapter: "verify",
+    headline: "Completed results",
+    narration: `Showing the ${plural(verified, "verified record")}. Deferred work remains unchanged in ServiceNow.`,
+    summary: deferredSummary,
+    chapters: journey.chapters.map(chapter => {
+      if (chapter.id === "remediate") return {
+        ...chapter,
+        isActive: false,
+        pause: undefined,
+        narration: `${plural(view.approvalCount, "approval")} and ${plural(view.readyToSimulateCount, "simulation")} deferred from this presentation.`,
+      };
+      if (chapter.id === "verify") return {
+        ...chapter,
+        isActive: true,
+        narration: `Verified ${plural(verified, "record")}. Evidence is preserved; deferred work remains available.`,
+      };
+      return { ...chapter, isActive: false };
+    }),
   };
 }
 
@@ -179,7 +218,7 @@ function buildRemediateChapter(view: WorkspaceViewState, beats: ActivityCard[], 
     status,
     narration,
     beats,
-    evidence: { kind: "remediate", approvals, executing, verified, totalApprovals },
+    evidence: { kind: "remediate", approvals, executing, verified, totalApprovals, readyToSimulate: view.readyToSimulateCount },
     pause,
     inspect: "remediate",
     isActive,
@@ -189,6 +228,22 @@ function buildRemediateChapter(view: WorkspaceViewState, beats: ActivityCard[], 
 function buildVerifyChapter(view: WorkspaceViewState, beats: ActivityCard[], isActive: boolean): JourneyChapter {
   const status = view.verifyStatus;
   const verifiedCount = view.queue.items.filter(item => item.bucket === "verified").length;
+  const verifiedItems = view.queue.items.filter(item => item.bucket === "verified");
+  const operationCounts = {
+    insert: verifiedItems.filter(item => item.ci.operation === "INSERT").length,
+    update: verifiedItems.filter(item => item.ci.operation === "UPDATE").length,
+    noChange: verifiedItems.filter(item => item.ci.operation === "NO_CHANGE").length,
+  };
+  const classes = new Map<string, number>();
+  for (const item of verifiedItems) {
+    const className = item.ci.className || "unknown class";
+    classes.set(className, (classes.get(className) ?? 0) + 1);
+  }
+  const classCounts = [...classes.entries()]
+    .map(([className, count]) => ({ className, count }))
+    .sort((left, right) => right.count - left.count || left.className.localeCompare(right.className));
+  const pendingCount = view.queue.items.filter(item => item.bucket !== "verified" && item.bucket !== "blocked" && item.bucket !== "simulation_failed").length;
+  const blockedCount = view.queue.items.filter(item => item.bucket === "blocked" || item.bucket === "simulation_failed").length;
   const relationshipsReady = view.snapshot.relationships.ready;
   const relationshipsTotal = view.snapshot.relationships.total;
   const narration = status === "waiting"
@@ -217,6 +272,12 @@ function buildVerifyChapter(view: WorkspaceViewState, beats: ActivityCard[], isA
       relationshipsTotal,
       verifiedCount,
       groupsResolved,
+      targetCount: verifiedItems.filter(item => Boolean(item.targetCiSysId)).length,
+      pendingCount,
+      blockedCount,
+      operationCounts,
+      classCounts,
+      healthSource: view.health.source,
     },
     inspect: "verify",
     isActive,

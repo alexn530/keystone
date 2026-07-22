@@ -227,6 +227,7 @@ function Confidence({ value }: { value: number }) {
 
 export function CmdbDashboard() {
   const [section, setSection] = useState<Section>("import");
+  const [packetReviewIntent, setPacketReviewIntent] = useState(0);
   const [apiState, setApiState] = useState<ApiState>("connecting");
   const [resourceState, setResourceState] = useState<ResourceState>(connectingResources);
   const [cis, setCis] = useState<ConfigurationItem[]>([]);
@@ -842,13 +843,13 @@ export function CmdbDashboard() {
         onOpenRun={(entry) => openRun({ id: entry.id, label: entry.label })}
         onNewImport={() => setSection("import")}
       />}
-      {(section === "workspace" || section === "approvals") && <AgentWorkspaceView runLabel={activeRunLabel} runId={activeRunId} runState={runRecord?.state ?? ""} apiState={apiState} analysisState={analysisState} cis={cis} timeline={timeline} relationships={relationships} findings={findings} reviews={reviews} health={health} focus={section === "approvals" ? "approvals" : "overview"} onOpenPhase={phase => setSection(phase)} onOpenVerify={() => setSection("evidence")} onOpenRemediation={stagedCiId => { setRemediationTargetId(stagedCiId ?? ""); setSection("remediate"); }} onOpenEvidence={() => setSection("evidence")} onOpenRun={(entry) => openRun({ id: entry.id, label: entry.label })} onRefresh={() => void loadData(activeRunId)} onRecoverPipeline={() => activeRunId && void startComprehend(activeRunId, true)} />}
+      {(section === "workspace" || section === "approvals") && <AgentWorkspaceView runLabel={activeRunLabel} runId={activeRunId} runState={runRecord?.state ?? ""} apiState={apiState} analysisState={analysisState} cis={cis} timeline={timeline} relationships={relationships} findings={findings} reviews={reviews} health={health} focus={section === "approvals" ? "approvals" : "overview"} onOpenPhase={phase => setSection(phase)} onOpenVerify={() => setSection("evidence")} onOpenRemediation={stagedCiId => { setRemediationTargetId(stagedCiId ?? ""); setSection("remediate"); }} onOpenPacketReview={() => { setRemediationTargetId(""); setPacketReviewIntent(current => current + 1); setSection("remediate"); }} onOpenEvidence={() => setSection("evidence")} onOpenRun={(entry) => openRun({ id: entry.id, label: entry.label })} onRefresh={() => void loadData(activeRunId)} onRecoverPipeline={() => activeRunId && void startComprehend(activeRunId, true)} />}
       {section === "evidence" && <LiveOpsView timeline={timeline} activeRunId={activeRunId} apiState={apiState} resourceStatus={resourceState.timeline} paused={livePaused} refreshing={liveRefreshing} refreshCount={liveRefreshCount} onPausedChange={setLivePaused} onRefresh={() => void refreshLiveTimeline()} />}
       {section === "comprehend" && <ComprehendView health={health} timeline={timeline} frames={playbackFrames} relationships={relationships} cis={filteredCis} allCis={cis} selectedCi={selectedCi} setSelectedCi={setSelectedCi} search={search} setSearch={setSearch} filter={filter} setFilter={setFilter} playing={playing} activeStep={clampedActiveStep} startPlayback={startPlayback} setActiveStep={setActiveStep} onStepFrame={stepFrame} onRestartPlayback={restartPlayback} apiState={apiState} resourceState={resourceState} activeRunId={activeRunId} runDraft={runDraft} setRunDraft={setRunDraft} loadRun={loadRunFromDraft} clearRun={() => { setRunDraft(""); openRun({ id: "", label: "" }); }} analysisState={analysisState} analysisMessage={analysisMessage} runState={runRecord?.state ?? ""} onStartAnalysis={(recover) => activeRunId && void startComprehend(activeRunId, recover)} />}
       {section === "live" && <LiveOpsView timeline={timeline} activeRunId={activeRunId} apiState={apiState} resourceStatus={resourceState.timeline} paused={livePaused} refreshing={liveRefreshing} refreshCount={liveRefreshCount} onPausedChange={setLivePaused} onRefresh={() => void refreshLiveTimeline()} />}
       {section === "hr" && <AgentHrView timeline={timeline} timelineLive={resourceState.timeline === "live"} cis={resourceState.cis === "live" ? cis : null} activeRunId={activeRunId} />}
       {section === "prioritize" && <PrioritizeView health={health} recalculating={apiState === "connecting"} onRecalculate={() => void loadData(activeRunId)} onFix={(fix) => { setQueuedFix(fix); setActionMessage(""); setSection("remediate"); }} />}
-      {section === "remediate" && <RemediateView key={activeRunId || "no-run"} health={health} cis={cis} timeline={timeline} findings={findings} reviews={reviews} activeRunId={activeRunId} runState={runRecord?.state ?? ""} apiState={apiState} queuedFix={queuedFix} initialStagedCiId={remediationTargetId} actionMessage={actionMessage} onSelect={(fix) => { setQueuedFix(fix); setActionMessage(""); }} onSubmit={submitRemediation} onRefresh={() => refreshRunResources(activeRunId)} />}
+      {section === "remediate" && <RemediateView key={activeRunId || "no-run"} health={health} cis={cis} timeline={timeline} findings={findings} reviews={reviews} activeRunId={activeRunId} runState={runRecord?.state ?? ""} apiState={apiState} queuedFix={queuedFix} initialStagedCiId={remediationTargetId} packetReviewIntent={packetReviewIntent} actionMessage={actionMessage} onSelect={(fix) => { setQueuedFix(fix); setActionMessage(""); }} onSubmit={submitRemediation} onRefresh={() => refreshRunResources(activeRunId)} />}
 
       <PageNavigation
         currentSection={currentNavId}
@@ -1145,6 +1146,7 @@ function RemediateView(props: {
   apiState: ApiState;
   queuedFix: HealthFix | null;
   initialStagedCiId?: string;
+  packetReviewIntent?: number;
   actionMessage: string;
   onSelect: (fix: HealthFix) => void;
   onSubmit: (
@@ -1155,7 +1157,7 @@ function RemediateView(props: {
   ) => void;
   onRefresh: () => Promise<void> | void;
 }) {
-  const { health, cis, timeline, findings, reviews, activeRunId, runState, apiState, queuedFix, initialStagedCiId, actionMessage, onSelect, onSubmit, onRefresh } = props;
+  const { health, cis, timeline, findings, reviews, activeRunId, runState, apiState, queuedFix, initialStagedCiId, packetReviewIntent, actionMessage, onSelect, onSubmit, onRefresh } = props;
   const selected = queuedFix || health.fixes[0];
   const stagedCis = cis.filter(ci => ci.id || ci.stagedCiId);
   const [selectedCiId, setSelectedCiId] = useState(() => stagedCis.find(ci => ci.id === initialStagedCiId || ci.stagedCiId === initialStagedCiId)?.id ?? stagedCis[0]?.id ?? "");
@@ -1182,8 +1184,35 @@ function RemediateView(props: {
   const [packetHashConfirmation, setPacketHashConfirmation] = useState("");
   const campaignRecoveryAttempted = useRef("");
   const packetRecoveryAttempted = useRef("");
+  const packetReviewAttempted = useRef(0);
   const failureGroupsLoadedRun = useRef("");
   const demoFallback = !activeRunId && apiState === "demo";
+
+  useEffect(() => {
+    if (!activeRunId || !packetReviewIntent || packetReviewAttempted.current === packetReviewIntent) return;
+    const timer = window.setTimeout(async () => {
+      packetReviewAttempted.current = packetReviewIntent;
+      setPacketPending("prepare-packet");
+      setPacketError("");
+      try {
+        const response = await fetch("/api/cmdb/remediation-campaign/prepare-packet", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ migration_run_id: activeRunId }),
+        });
+        const payload = await response.json().catch(() => ({ error: response.statusText })) as Record<string, unknown>;
+        if (!response.ok) throw new Error(typeof payload.error === "string" ? payload.error : `Packet preparation failed with HTTP ${response.status}.`);
+        setPacketHashConfirmation("");
+        setApprovalPacket({ packet: payload as FrozenApprovalPacketView });
+        await onRefresh();
+      } catch (error) {
+        setPacketError(error instanceof Error ? error.message : "Packet preparation failed.");
+      } finally {
+        setPacketPending(null);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [activeRunId, onRefresh, packetReviewIntent]);
 
   const selectedCi = stagedCis.find(ci => ci.id === selectedCiId) ?? stagedCis[0];
   const workbench = selectedCi ? ireRecords[selectedCi.id] ?? {} : {};

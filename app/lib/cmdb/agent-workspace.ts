@@ -139,8 +139,16 @@ export function deriveAgentWorkspaceSnapshot(input: {
   const explicitProjected = lastMetric(input.timeline, "projected_score") ?? input.health.projectedScore;
   const realizedLift = groups.reduce((sum, group) => sum + group.realizedLift, 0);
   const remainingLift = groups.reduce((sum, group) => sum + Math.max(0, group.projectedLift - group.realizedLift), 0);
-  const baseline = clamp(explicitBaseline ?? input.health.score - realizedLift);
-  const verified = clamp(explicitVerified ?? Math.max(input.health.score, baseline + realizedLift));
+  const stagedHealthScores = input.cis.map(ci => ci.health).filter(score => Number.isFinite(score));
+  const stagedBaseline = stagedHealthScores.length
+    ? stagedHealthScores.reduce((sum, score) => sum + score, 0) / stagedHealthScores.length
+    : undefined;
+  // When ServiceNow does not report historical score fields, reconstruct the
+  // story from evidence that is still durable for the run: staged CI health
+  // at intake plus realized and remaining work-group lift. The current
+  // aggregate score is not substituted for all three points.
+  const baseline = clamp(explicitBaseline ?? stagedBaseline ?? input.health.score - realizedLift);
+  const verified = clamp(explicitVerified ?? baseline + realizedLift);
   const projected = clamp(explicitProjected ?? verified + remainingLift);
   const relationshipReadiness = deriveRelationshipReadiness(input.relationships, input.queue.items);
   const phases = derivePhases(input.timeline, input.queue, input.runState);

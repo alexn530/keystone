@@ -90,6 +90,7 @@ export type WorkspaceHealthView = {
   projected: number | null;
   realizedLift: number | null;
   remainingLift: number | null;
+  source: "reported" | "derived" | "unavailable";
 };
 
 export type ActivityCard = {
@@ -269,24 +270,20 @@ export function deriveWorkspaceViewState(input: WorkspaceViewInput): WorkspaceVi
     requiresApproval, requiresReview, approvalCount, heldCount, hasRun, approvalPacketPrepared,
   });
 
-  const liveHealthAvailable = Boolean(
-    input.health.baselineScore !== undefined
-    || input.health.verifiedScore !== undefined
-    || input.health.projectedScore !== undefined,
-  );
-  const health = liveHealthAvailable
+  const reportedHealth = input.health.baselineScore !== undefined
+    && input.health.verifiedScore !== undefined
+    && input.health.projectedScore !== undefined;
+  const health = hasRun
     ? {
-        baseline: input.health.baselineScore ?? null,
-        verified: input.health.verifiedScore ?? null,
-        projected: input.health.projectedScore ?? null,
-        realizedLift: input.health.verifiedScore !== undefined && input.health.baselineScore !== undefined
-          ? round(input.health.verifiedScore - input.health.baselineScore)
-          : null,
-        remainingLift: input.health.projectedScore !== undefined && input.health.verifiedScore !== undefined
-          ? round(input.health.projectedScore - input.health.verifiedScore)
-          : null,
+        baseline: round(snapshot.health.baseline),
+        verified: round(snapshot.health.verified),
+        projected: round(snapshot.health.projected),
+        realizedLift: round(snapshot.health.realizedLift),
+        remainingLift: round(snapshot.health.remainingLift),
+        source: reportedHealth ? "reported" as const : "derived" as const,
       }
-    : { baseline: null, verified: null, projected: null, realizedLift: null, remainingLift: null };
+    : { baseline: null, verified: null, projected: null, realizedLift: null, remainingLift: null, source: "unavailable" as const };
+  const liveHealthAvailable = health.source !== "unavailable";
 
   return {
     runLabel: input.runLabel,

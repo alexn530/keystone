@@ -11,6 +11,7 @@ import {
   type WorkspaceViewState,
 } from "./lib/cmdb/workspace-view-state";
 import {
+  deriveDeferredPresentation,
   deriveRunJourney,
   type JourneyChapter,
   type JourneyChapterId,
@@ -35,6 +36,7 @@ export function AgentWorkspaceView(props: {
   onOpenPhase: (phase: CprPhaseId) => void;
   onOpenVerify?: () => void;
   onOpenRemediation: (stagedCiId?: string) => void;
+  onOpenPacketReview: () => void;
   onOpenEvidence: () => void;
   onOpenRun?: (entry: { id: string; label: string }) => void;
   onRefresh: () => void;
@@ -58,6 +60,13 @@ export function AgentWorkspaceView(props: {
   ]);
 
   const journey = useMemo(() => deriveRunJourney(view), [view]);
+  const presentationKey = props.runId || props.runLabel;
+  const [completedResultsKey, setCompletedResultsKey] = useState<string | null>(null);
+  const showCompletedResults = Boolean(presentationKey && completedResultsKey === presentationKey);
+  const displayedJourney = useMemo(
+    () => showCompletedResults ? deriveDeferredPresentation(journey, view) : journey,
+    [journey, showCompletedResults, view],
+  );
 
   const sourceLabel = props.apiState === "live" || props.apiState === "partial"
     ? "LIVE FACTORY FLOOR"
@@ -118,22 +127,50 @@ export function AgentWorkspaceView(props: {
       </button>
     </section>}
 
-    <RunJourneyBanner journey={journey} />
+    {showCompletedResults && <PresentationScopeBanner
+      verified={view.queue.items.filter(item => item.bucket === "verified").length}
+      deferred={view.approvalCount + view.readyToSimulateCount + view.heldCount}
+      onResume={() => setCompletedResultsKey(null)}
+      onOpenVerify={() => openPhase("verify")}
+    />}
+
+    <RunJourneyBanner journey={displayedJourney} />
 
     <ol className="journey-spine" aria-label="Run journey chapters">
-      {journey.chapters.map((chapter, index) => (
+      {displayedJourney.chapters.map((chapter, index) => (
         <JourneyChapterCard
           key={chapter.id}
           chapter={chapter}
           index={index + 1}
           onOpenPhase={openPhase}
           onOpenRemediation={props.onOpenRemediation}
+          onOpenPacketReview={props.onOpenPacketReview}
           onOpenEvidence={props.onOpenEvidence}
+          onShowCompletedResults={() => setCompletedResultsKey(presentationKey)}
         />
       ))}
     </ol>
     {summaryModal}
   </div>;
+}
+
+function PresentationScopeBanner({ verified, deferred, onResume, onOpenVerify }: {
+  verified: number;
+  deferred: number;
+  onResume: () => void;
+  onOpenVerify: () => void;
+}) {
+  return <section className="presentation-scope" role="status">
+    <div>
+      <small>PRESENTATION SCOPE</small>
+      <strong>{verified} verified records shown · {deferred} records deferred</strong>
+      <p>Presentation only — no reviews were rejected and ServiceNow was not changed.</p>
+    </div>
+    <div className="presentation-scope-actions">
+      <button className="ghost-button" onClick={onResume}><Icon name="refresh" size={14} /> Resume remaining work</button>
+      <button className="primary-button" onClick={onOpenVerify}><Icon name="check" size={14} /> Open verified evidence</button>
+    </div>
+  </section>;
 }
 
 function FactoryHeader({ view, sourceLabel, runLabel, onRefresh, onOpenSummary }: { view: WorkspaceViewState; sourceLabel: string; runLabel: string; onRefresh: () => void; onOpenSummary: () => void }) {
@@ -181,7 +218,9 @@ function JourneyChapterCard(props: {
   index: number;
   onOpenPhase: (phase: JourneyChapterId) => void;
   onOpenRemediation: (stagedCiId?: string) => void;
+  onOpenPacketReview: () => void;
   onOpenEvidence: () => void;
+  onShowCompletedResults: () => void;
 }) {
   const { chapter } = props;
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
@@ -217,7 +256,15 @@ function JourneyChapterCard(props: {
     </button>
 
     {open && <div className="journey-chapter-body">
-      {chapter.pause && <PauseCard pause={chapter.pause} onReview={() => props.onOpenPhase("comprehend")} onApprovals={() => props.onOpenRemediation()} />}
+      {chapter.pause && chapter.evidence.kind === "remediate" && <PauseCard
+        pause={chapter.pause}
+        approvalCount={chapter.evidence.totalApprovals}
+        readyCount={chapter.evidence.readyToSimulate}
+        verifiedCount={chapter.evidence.verified}
+        onReview={() => props.onOpenPhase("comprehend")}
+        onApprovals={props.onOpenPacketReview}
+        onShowCompletedResults={props.onShowCompletedResults}
+      />}
 
       <EvidenceBlock chapter={chapter} onOpenRemediation={props.onOpenRemediation} />
 
@@ -254,7 +301,15 @@ function statusLabel(statusClass: string) {
   }
 }
 
-function PauseCard({ pause, onReview, onApprovals }: { pause: { message: string; actions: string[] }; onReview: () => void; onApprovals: () => void }) {
+function PauseCard({ pause, approvalCount, readyCount, verifiedCount, onReview, onApprovals, onShowCompletedResults }: {
+  pause: { message: string; actions: string[] };
+  approvalCount: number;
+  readyCount: number;
+  verifiedCount: number;
+  onReview: () => void;
+  onApprovals: () => void;
+  onShowCompletedResults: () => void;
+}) {
   return <div className="journey-pause">
     <div className="journey-pause-top">
       <span className="journey-pause-avatar" aria-hidden="true">🪷</span>
@@ -263,12 +318,23 @@ function PauseCard({ pause, onReview, onApprovals }: { pause: { message: string;
         <strong>{pause.message}</strong>
       </div>
     </div>
+    <div className="journey-decision-grid">
+      <article>
+        <small>RESOLVE NOW</small>
+        <strong>Resolve pending approvals</strong>
+        <p>Review the next homogeneous packet from {approvalCount} pending records. ServiceNow still executes and verifies each CI independently.</p>
+        <button className="primary-button" onClick={onApprovals}><Icon name="shield" size={14} /> Review next bounded packet</button>
+      </article>
+      <article>
+        <small>DEFER FOR LATER</small>
+        <strong>Show completed results now</strong>
+        <p>Leave {approvalCount + readyCount} pending records unchanged and continue this presentation with {verifiedCount} verified records.</p>
+        <button className="ghost-button" onClick={onShowCompletedResults} disabled={verifiedCount === 0}><Icon name="arrow" size={14} /> View completed results</button>
+      </article>
+    </div>
     <div className="journey-pause-actions">
       {pause.actions.includes("review_findings") && <button className="ghost-button" onClick={onReview}>
         <Icon name="search" size={14} /> Review evidence
-      </button>}
-      {pause.actions.includes("open_approvals") && <button className="primary-button" onClick={onApprovals}>
-        <Icon name="shield" size={14} /> Open approvals
       </button>}
     </div>
   </div>;
@@ -321,7 +387,30 @@ function EvidenceBlock({ chapter, onOpenRemediation }: { chapter: JourneyChapter
       </div>;
     case "verify":
       return <div className="journey-evidence">
-        <div className="journey-health">
+        <div className="journey-verification-summary">
+          <div className="journey-verification-heading">
+            <span className="journey-verification-icon"><Icon name="check" size={16} /></span>
+            <div>
+              <small>MARA&apos;S VERIFICATION SUMMARY</small>
+              <strong>{evidence.verifiedCount} CIs passed correlated ServiceNow read-back.</strong>
+              <p>{evidence.pendingCount > 0
+                ? `${evidence.pendingCount} records remain pending or deferred; their ServiceNow evidence is unchanged.`
+                : "All eligible records in this run reached a durable verification outcome."}</p>
+            </div>
+          </div>
+          <div className="journey-verification-metrics">
+            <Stat label="Verified" value={evidence.verifiedCount} tone="good" />
+            <Stat label="Inserted" value={evidence.operationCounts.insert} tone={evidence.operationCounts.insert > 0 ? "good" : "muted"} />
+            <Stat label="Updated" value={evidence.operationCounts.update} tone={evidence.operationCounts.update > 0 ? "good" : "muted"} />
+            <Stat label="Target CIs" value={evidence.targetCount} tone={evidence.targetCount === evidence.verifiedCount && evidence.verifiedCount > 0 ? "good" : "warn"} />
+          </div>
+          <div className="journey-verification-detail">
+            <span>NO CHANGE {evidence.operationCounts.noChange}</span>
+            <span>BLOCKED {evidence.blockedCount}</span>
+            {evidence.classCounts.map(item => <span key={item.className}>{item.className} {item.count}</span>)}
+          </div>
+        </div>
+        {(evidence.baseline !== null || evidence.verified !== null || evidence.projected !== null) && <div className="journey-health">
           <div className="journey-health-cell">
             <small>BASELINE</small>
             <strong>{formatHealth(evidence.baseline)}</strong>
@@ -338,7 +427,12 @@ function EvidenceBlock({ chapter, onOpenRemediation }: { chapter: JourneyChapter
             <strong className="projected">{formatHealth(evidence.projected)}</strong>
             <span>{evidence.remainingLift === null ? "Projection unavailable" : `+${evidence.remainingLift} available`}</span>
           </div>
-        </div>
+        </div>}
+        {evidence.healthSource !== "unavailable" && <p className="journey-health-source">
+          {evidence.healthSource === "reported"
+            ? "Health progression reported by ServiceNow run evidence."
+            : "Health progression derived from staged CI health plus realized and remaining work-group lift."}
+        </p>}
         <div className="journey-verify-meta">
           <span>{evidence.verifiedCount} verified · {evidence.groupsResolved} groups resolved · {evidence.relationshipsReady}/{evidence.relationshipsTotal} relationships ready</span>
         </div>

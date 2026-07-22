@@ -24,6 +24,7 @@ require.extensions[".ts"] = function loadTypeScript(module, filename) {
 const { deriveRemediationWorkQueue } = require("../app/lib/cmdb/work-queue.ts");
 const { deriveAgentWorkspaceSnapshot } = require("../app/lib/cmdb/agent-workspace.ts");
 const { deriveWorkspaceViewState, hasCprHandoffGap } = require("../app/lib/cmdb/workspace-view-state.ts");
+const { deriveDeferredPresentation, deriveRunJourney } = require("../app/lib/cmdb/run-journey.ts");
 const { sanitizeIreRequest } = require("../app/api/cmdb/ire/[action]/route.ts");
 
 const runId = "e0ac4df32b82871060aefba6b891bf5b";
@@ -62,6 +63,21 @@ assert.deepEqual(snapshot.relationships, { total: 1, ready: 0, blocked: 1 });
 const completedComprehend = [
   event(1, "Analysis completed", "Comprehend", "Analysis completed. 2000 staged CIs processed."),
 ];
+const derivedHealthSnapshot = deriveAgentWorkspaceSnapshot({
+  runLabel: "RUN-DERIVED-HEALTH",
+  runState: "analyzing",
+  cis: cis.map(item => ({ ...item, health: 70 })),
+  timeline: completedComprehend,
+  relationships: [],
+  findings,
+  reviews: [],
+  health: { ...health, baselineScore: undefined, verifiedScore: undefined, projectedScore: undefined, score: 100 },
+  queue,
+});
+assert.equal(derivedHealthSnapshot.health.baseline, 70, "missing historical scores must fall back to staged CI health");
+assert.ok(derivedHealthSnapshot.health.verified >= derivedHealthSnapshot.health.baseline);
+assert.ok(derivedHealthSnapshot.health.projected >= derivedHealthSnapshot.health.verified);
+
 assert.equal(hasCprHandoffGap("analyzing", completedComprehend), true);
 assert.equal(hasCprHandoffGap("analyzing", [...completedComprehend, event(2, "Mara started", "Mara", "Supervisor started")]), false);
 assert.equal(hasCprHandoffGap("awaiting_approval", completedComprehend), false);
@@ -118,6 +134,37 @@ assert.equal(historicalPacketView.heldCount, 0, "evidence row counts must not ma
 assert.equal(historicalPacketView.readyToSimulateCount, 2, "current CI lifecycle rows should be presented as ready to simulate");
 assert.equal(historicalPacketView.activePhase, "remediate", "remaining simulation work must keep Agent Workspace on Remediate");
 assert.equal(historicalPacketView.mara.headline, "Ready for simulation");
+const deferredPresentation = deriveDeferredPresentation(deriveRunJourney(historicalPacketView), historicalPacketView);
+assert.equal(deferredPresentation.activeChapter, "verify");
+assert.equal(deferredPresentation.chapters.find(chapter => chapter.id === "verify")?.isActive, true);
+assert.equal(deferredPresentation.chapters.find(chapter => chapter.id === "remediate")?.pause, undefined);
+assert.match(deferredPresentation.narration, /ServiceNow/i);
+
+const verifiedJourney = deriveRunJourney({
+  ...historicalPacketView,
+  queue: {
+    ...historicalPacketView.queue,
+    items: [{
+      ...historicalPacketView.queue.items[0],
+      bucket: "verified",
+      targetCiSysId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      executionCorrelation: "ks-exec-summary",
+      ci: { ...historicalPacketView.queue.items[0].ci, operation: "INSERT", className: "cmdb_ci_linux_server" },
+    }],
+  },
+});
+const verifiedEvidence = verifiedJourney.chapters.find(chapter => chapter.id === "verify")?.evidence;
+assert.equal(verifiedEvidence?.kind, "verify");
+assert.equal(verifiedEvidence?.verifiedCount, 1);
+assert.equal(verifiedEvidence?.targetCount, 1);
+assert.equal(verifiedEvidence?.operationCounts.insert, 1);
+assert.deepEqual(verifiedEvidence?.classCounts, [{ className: "cmdb_ci_linux_server", count: 1 }]);
+
+const workspaceSource = fs.readFileSync(path.join(root, "app", "agent-workspace.tsx"), "utf8");
+assert.match(workspaceSource, /Review next bounded packet/, "Agent Workspace must expose the bounded packet route");
+assert.match(workspaceSource, /View completed results/, "Agent Workspace must expose a presentation-only defer route");
+assert.match(workspaceSource, /ServiceNow was not changed/, "the defer route must disclose its non-authoritative scope");
+assert.match(workspaceSource, /MARA&amp;apos;S VERIFICATION SUMMARY|MARA&apos;S VERIFICATION SUMMARY/, "Verify must expose a durable Mara summary");
 
 const execute = sanitizeIreRequest("execute", {
   migration_run_id: runId,
