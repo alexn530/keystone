@@ -689,7 +689,13 @@ export function CmdbDashboard() {
     {mobileNavOpen && <div className="mobile-nav-backdrop" onClick={() => setMobileNavOpen(false)} aria-hidden="true" />}
     <aside className="sidebar" aria-label="Primary navigation">
       <div className="brand">
-        <span className="brand-mark"><span /></span>
+        <span className="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M6.6 7 H17.4 L15.4 19 H8.6 Z" fill="rgba(199, 243, 77, .13)" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+            <path d="M7.2 10.2 H16.8" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" opacity=".55" />
+            <path d="M12 10.2 V19" stroke="currentColor" strokeWidth="1" strokeLinecap="round" opacity=".38" />
+          </svg>
+        </span>
         <div className="brand-copy"><strong>CMDB</strong><small>MODERNIZATION CONTROL</small></div>
         <button
           type="button"
