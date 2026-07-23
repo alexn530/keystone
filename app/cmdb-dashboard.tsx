@@ -2111,11 +2111,9 @@ function SelectedCiIreEvidence(props: {
         </span>
         <strong>{isExecutionFailure ? "Simulation failed" : "Live IRE response"}</strong>
       </div>
-      <p className="ci-evidence-message">
-        {isExecutionFailure
-          ? failure.message
-          : selectedQueueItem?.reason || "ServiceNow returned an IRE response for this staged CI."}
-      </p>
+      <EvidenceMessage text={isExecutionFailure
+        ? failure.message
+        : selectedQueueItem?.reason || "ServiceNow returned an IRE response for this staged CI."} />
       <div className="ci-evidence-chips">
         {selectedQueueItem?.evidence.slice(0, 6).map((item, index) => <code key={`${item}-${index}`}>{item}</code>)}
       </div>
@@ -2136,7 +2134,7 @@ function SelectedCiIreEvidence(props: {
         <span className="ci-evidence-scope">CI-SPECIFIC · SELECTED STAGED CI</span>
         <strong>{sourceLabel(selectedQueueItem.source)}</strong>
       </div>
-      <p className="ci-evidence-message">{selectedQueueItem.reason}</p>
+      <EvidenceMessage text={selectedQueueItem.reason} />
       <div className="ci-evidence-chips">
         {selectedQueueItem.evidence.slice(0, 6).map((item, index) => <code key={`${item}-${index}`}>{item}</code>)}
       </div>
@@ -2150,6 +2148,25 @@ function SelectedCiIreEvidence(props: {
     </div>
     <p className="ci-evidence-message">{CI_EVIDENCE_EMPTY_STATE}</p>
   </div>;
+}
+
+// IRE response reasons are frequently raw JSON payloads. Pretty-print them into
+// a wrapping <pre> so long, space-free strings (fingerprints, correlation ids)
+// break instead of overflowing the card. Non-JSON text falls back to a normal
+// wrapping paragraph.
+function EvidenceMessage({ text }: { text: string }) {
+  const pretty = useMemo(() => {
+    const trimmed = (text ?? "").trim();
+    if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return null;
+    try {
+      return JSON.stringify(JSON.parse(trimmed), null, 2);
+    } catch {
+      return null;
+    }
+  }, [text]);
+
+  if (pretty !== null) return <pre className="ci-evidence-message ci-evidence-json">{pretty}</pre>;
+  return <p className="ci-evidence-message">{text}</p>;
 }
 
 function IneligibleCiCard({ failure, selectedCi }: { failure: SimulationFailureClassification; selectedCi: ConfigurationItem }) {
