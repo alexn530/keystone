@@ -41,9 +41,12 @@ ServiceNow owns workflow evidence and IRE remains the only CI write path.
 
 ## Agent model
 
-Mara is the supervisor. Router, Atlas, Scout, Weaver, and Sentry are reasoning
+Mara is the supervisor. Weaver, Router, Atlas, Guard, and Scout are reasoning
 subagents. Ledger is shared audit memory. IRE is the governed execution engine.
 Authoritative model execution belongs in ServiceNow.
+
+The frontend displays specialists in W-R-A-G-S order. Persisted legacy
+`Sentry` actor evidence aliases to the user-facing `Guard` name.
 
 ## Demo fallback
 

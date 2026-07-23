@@ -82,17 +82,21 @@ condition, not the expected response for an ordinary existing-CI match.
 
 ## Mara and the agent team
 
-Mara is the migration supervisor. Router, Atlas, Scout, Weaver, and Sentry are
+Mara is the migration supervisor. Weaver, Router, Atlas, Guard, and Scout are
 specialized reasoning agents whose actions and handoffs are reconstructed from
 ServiceNow evidence.
 
+- **Weaver** examines relationship evidence.
 - **Router** directs the next safe specialist step.
 - **Atlas** evaluates class and attribute evidence.
+- **Guard** applies deterministic confidence and policy gates.
 - **Scout** investigates identity and duplicate signals.
-- **Weaver** examines relationship evidence.
-- **Sentry** applies deterministic confidence and policy gates.
 - **Ledger** is shared audit memory, not a reasoning agent.
 - **IRE** is the governed ServiceNow execution engine, not an agent.
+
+The UI orders the specialists as **W · R · A · G · S**. Existing ServiceNow
+events recorded with the historical actor name `Sentry` are displayed as
+`Guard` without rewriting the audit history.
 
 Model execution belongs in ServiceNow Script Includes. The browser receives no
 model-provider credentials, cannot manufacture authoritative payloads, and

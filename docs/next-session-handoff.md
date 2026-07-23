@@ -105,9 +105,10 @@ controlled demonstrations.
 - Prioritize and Remediate cap displayed lift to the remaining headroom. At
   100%, recommendations show `Health at maximum`, `Risk reduction`, and
   `Maintain 100%`.
-- Comprehend presents Mara as supervisor, Router/Atlas/Scout/Weaver/Sentry as
-  reasoning subagents, Ledger as shared audit memory, and IRE as the execution
-  engine.
+- Comprehend presents Mara as supervisor and
+  Weaver/Router/Atlas/Guard/Scout in W-R-A-G-S order as reasoning subagents,
+  Ledger as shared audit memory, and IRE as the execution engine. Historical
+  ServiceNow actor `Sentry` renders as Guard.
 
 ## Completed live acceptance
 

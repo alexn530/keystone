@@ -59,10 +59,13 @@ ServiceNow IRE execution
 CMDB CI records and later governed relationships
 ```
 
-Mara, Router, Atlas, Scout, Weaver, and Sentry run or are represented through
+Mara, Weaver, Router, Atlas, Guard, and Scout run or are represented through
 ServiceNow-owned agent evidence. Ledger is shared audit memory. IRE is the
 execution engine. No model-provider credential or authoritative agent loop
 belongs in the browser.
+
+Comprehend orders the specialists as W-R-A-G-S. Existing ServiceNow evidence
+recorded with actor `Sentry` is retained and presented as Guard.
 
 The existing `/api/cmdb/*` compatibility routes support read resources,
 identifier-only lifecycle actions, campaigns, approval packets, autonomous

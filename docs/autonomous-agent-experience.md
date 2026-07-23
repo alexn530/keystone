@@ -10,7 +10,8 @@ When a run begins:
 
 1. Comprehend reviews the staged estate.
 2. Its LLM planner chooses specialist tools.
-3. Router, Atlas, Scout, Weaver, and Sentry exchange observations with Mara through the Event Ledger.
+3. Weaver, Router, Atlas, Guard, and Scout exchange observations with Mara
+   through the Event Ledger.
 4. Safe read-only work continues without user clicks.
 5. Mara observes the completed evidence, groups gaps, investigates likely root causes, and chooses the next safe agent handoff.
 6. Non-mutating investigation and IRE simulation may continue autonomously.
@@ -26,10 +27,11 @@ The intended demo arc is:
     v
 ServiceNow Comprehend LLM planner
     |
-    +--> Atlas: class and attribute evidence
-    +--> Scout: duplicate and identity evidence
     +--> Weaver: relationship evidence
-    +--> Sentry: deterministic confidence gate
+    +--> Router: next-safe-step routing
+    +--> Atlas: class and attribute evidence
+    +--> Guard: deterministic confidence gate
+    +--> Scout: duplicate and identity evidence
     +--> Ledger: persisted outcome
     |
     v
@@ -114,7 +116,12 @@ The Script Include must reject unknown actions, arbitrary table names, browser-s
 
 ## Persisted Activity Contract
 
-The frontend reads Mara through the same run-scoped ServiceNow bridge and Event Ledger used by the other agents. Mara is the supervisor; Router, Atlas, Scout, Weaver, and Sentry are reasoning subagents. Ledger is shared audit memory, and IRE is the governed execution engine rather than another agent.
+The frontend reads Mara through the same run-scoped ServiceNow bridge and Event
+Ledger used by the other agents. Mara is the supervisor; Weaver, Router, Atlas,
+Guard, and Scout are reasoning subagents. Ledger is shared audit memory, and
+IRE is the governed execution engine rather than another agent. Comprehend
+orders the specialists as W-R-A-G-S. Existing persisted actor `Sentry` is
+displayed as Guard for backward compatibility.
 
 Recommended actors:
 
@@ -124,7 +131,7 @@ Router
 Atlas
 Scout
 Weaver
-Sentry
+Guard
 Ledger
 Mara
 ```
@@ -212,8 +219,9 @@ The frontend adds no additional model usage.
 ## Acceptance Criteria
 
 - Comprehend's real LLM tool choices appear live in sequence.
-- Comprehend shows Mara as supervisor and Router, Atlas, Scout, Weaver, and
-  Sentry as reasoning subagents from persisted evidence. Ledger is labeled as
+- Comprehend shows Mara as supervisor and Weaver, Router, Atlas, Guard, and
+  Scout in W-R-A-G-S order as reasoning subagents from persisted evidence.
+  Ledger is labeled as
   shared audit memory and IRE as the governed execution engine.
 - Mara model execution occurs only in ServiceNow Script Includes.
 - The browser contains no provider key and calls no external LLM endpoint.

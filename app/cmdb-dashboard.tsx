@@ -2178,7 +2178,7 @@ function IneligibleCiCard({ failure, selectedCi }: { failure: SimulationFailureC
       <strong>How to unblock:</strong>
       <ul>
         <li>Enrich the source data with a stable identifier (IP, hostname, serial number, or MAC).</li>
-        <li>Re-import the dataset; Sentry re-scores after fresh evidence lands.</li>
+        <li>Re-import the dataset; Guard re-scores after fresh evidence lands.</li>
         <li>Or approve the finding manually if a reviewer has out-of-band confirmation of identity.</li>
       </ul>
     </div>
@@ -2568,9 +2568,9 @@ function PastRunSummaryBody({ cis, timeline, health, findings, reviews, entry }:
         {recent.map(event => <li key={event.id} className={"summary-activity-row " + event.status}>
           <span className={"summary-activity-dot " + event.status} aria-hidden="true" />
           <div>
-            <small>#{event.seq} · {event.source || event.className}</small>
-            <strong>{event.name || event.recordName}</strong>
-            <p>{event.reasoning}</p>
+            <small>#{event.seq} · {agentDisplayName(event.source || event.className)}</small>
+            <strong>{(event.name || event.recordName).replace(/\bSentry\b/g, "Guard")}</strong>
+            <p>{event.reasoning.replace(/\bSentry\b/g, "Guard")}</p>
           </div>
         </li>)}
       </ul>
@@ -2709,18 +2709,23 @@ function sourceSystemLabel(source: string) {
 // the machinist. Non-listed actors are still shown but at the tail.
 const KNOWN_WORKERS: Array<{
   name: string;
+  actorNames: string[];
   role: string;
   station: string;
   glyph: string;
 }> = [
-  { name: "Mara",   role: "Supervisor",  station: "Migration coordination", glyph: "M" },
-  { name: "Router", role: "Intake",      station: "Source routing",         glyph: "R" },
-  { name: "Atlas",  role: "Classifier",  station: "Class proposal",         glyph: "A" },
-  { name: "Scout",  role: "Identity",    station: "Duplicate scan",         glyph: "S" },
-  { name: "Weaver", role: "Relations",   station: "Relationship weave",     glyph: "W" },
-  { name: "Sentry", role: "Gatekeeper",  station: "Confidence gate",        glyph: "G" },
+  { name: "Mara",   actorNames: ["Mara"],            role: "Supervisor", station: "Migration coordination", glyph: "M" },
+  { name: "Weaver", actorNames: ["Weaver"],          role: "Relations",  station: "Relationship weave",     glyph: "W" },
+  { name: "Router", actorNames: ["Router"],          role: "Intake",     station: "Source routing",         glyph: "R" },
+  { name: "Atlas",  actorNames: ["Atlas"],           role: "Classifier", station: "Class proposal",         glyph: "A" },
+  { name: "Guard",  actorNames: ["Guard", "Sentry"], role: "Gatekeeper", station: "Confidence gate",        glyph: "G" },
+  { name: "Scout",  actorNames: ["Scout"],           role: "Identity",   station: "Duplicate scan",         glyph: "S" },
 ];
-const SUBAGENT_NAMES = new Set(KNOWN_WORKERS.map(worker => worker.name));
+const SUBAGENT_NAMES = new Set(KNOWN_WORKERS.flatMap(worker => worker.actorNames));
+
+function agentDisplayName(name: string) {
+  return name.toLowerCase() === "sentry" ? "Guard" : name;
+}
 
 /**
  * Roster strip: one card per agent that actually contributed to this run.
@@ -2752,7 +2757,7 @@ function WorkerRoster({ timeline }: { timeline: TimelineEvent[] }) {
   }
   const cards: Array<{ name: string; role: string; station: string; glyph: string; count: number; latest?: TimelineEvent; unknown?: boolean }> = [];
   for (const worker of KNOWN_WORKERS) {
-    const entry = [...byActor.entries()].find(([actor]) => actor.toLowerCase() === worker.name.toLowerCase());
+    const entry = [...byActor.entries()].find(([actor]) => worker.actorNames.some(name => actor.toLowerCase() === name.toLowerCase()));
     if (entry) {
       cards.push({ ...worker, count: entry[1].count, latest: entry[1].latest });
     }
@@ -2787,7 +2792,7 @@ function WorkerRoster({ timeline }: { timeline: TimelineEvent[] }) {
     <div className="agent-handoff-panel">
       <div className="campaign-list-head"><strong>Recorded subagent handoffs</strong><span>{handoffs.length}</span></div>
       {handoffs.map(step => <div className="agent-handoff-row" key={step.id}>
-        <strong>{step.handoffFrom} <span>→</span> {step.actor}</strong>
+        <strong>{agentDisplayName(step.handoffFrom || "")} <span>→</span> {agentDisplayName(step.actor)}</strong>
         <p>{step.summary}</p>
       </div>)}
       {!handoffs.length && <p className="agent-handoff-empty">No cross-agent handoff has been recorded for this run yet.</p>}
@@ -2808,9 +2813,9 @@ function WorkerCard({ card }: { card: { name: string; role: string; station: str
   const rawDetail = (latest?.reasoning || "").trim();
   // Never leak Mara observation JSON blobs; show a stock line for those.
   const looksStructured = /^\s*[{[]|Observation\s*:/i.test(rawDetail);
-  const cleanDetail = looksStructured
+  const cleanDetail = (looksStructured
     ? "Structured observation recorded — open the ledger for source."
-    : rawDetail.replace(/\s+/g, " ").slice(0, 140) || "No tool call recorded.";
+    : rawDetail.replace(/\s+/g, " ").slice(0, 140) || "No tool call recorded.").replace(/\bSentry\b/g, "Guard");
   return <li className={`worker-card worker-${toneClass}${card.unknown ? " worker-unknown" : ""}`}>
     <div className="worker-avatar" aria-hidden="true">{card.glyph}</div>
     <div className="worker-body">
@@ -2823,7 +2828,7 @@ function WorkerCard({ card }: { card: { name: string; role: string; station: str
       <div className="worker-meta">
         <span className={`worker-pilot worker-pilot-${toneClass}`} aria-hidden="true" />
         <span>{card.count} tool call{card.count === 1 ? "" : "s"}</span>
-        {latest && <span className="worker-latest">last: {latest.name}</span>}
+        {latest && <span className="worker-latest">last: {latest.name.replace(/\bSentry\b/g, "Guard")}</span>}
       </div>
     </div>
   </li>;
@@ -2858,10 +2863,10 @@ function ActivityFeedRow({ row }: { row: ActivityRow }) {
   const looksStructured = /^\s*[{[]|Observation\s*:/i.test(detail);
   const readable = looksStructured
     ? "Structured evidence recorded. Open technical evidence to inspect the source data."
-    : (detail.replace(/\s+/g, " ").trim() || "—");
+    : (detail.replace(/\s+/g, " ").trim() || "—").replace(/\bSentry\b/g, "Guard");
   return <article className={row.tone}>
-    <small>{row.label}{row.actor ? ` · ${row.actor}` : ""}</small>
-    <strong>{row.title}</strong>
+    <small>{row.label}{row.actor ? ` · ${agentDisplayName(row.actor)}` : ""}</small>
+    <strong>{row.title.replace(/\bSentry\b/g, "Guard")}</strong>
     <p>{readable}</p>
     {looksStructured && <details className="activity-technical">
       <summary>Technical evidence</summary>

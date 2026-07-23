@@ -122,7 +122,8 @@ toggle off or changing runs disarms autonomy.
 
 - Show the staged CI count, normalization, class and identity evidence,
   findings, and deterministic work groups.
-- Show Mara as supervisor, Router/Atlas/Scout/Weaver/Sentry as reasoning
+- Show Mara as supervisor and Weaver/Router/Atlas/Guard/Scout in W-R-A-G-S
+  order as reasoning
   subagents, their recorded handoffs, Ledger as shared audit memory, and IRE as
   the governed execution engine.
 - If CMDB health is 100%, explain that remaining recommendations reduce

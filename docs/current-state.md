@@ -74,9 +74,12 @@ drift, failures, and blockers. Those conditions require human review.
 
 ## Agent model
 
-Mara is the supervisor. Router, Atlas, Scout, Weaver, and Sentry are reasoning
+Mara is the supervisor. Weaver, Router, Atlas, Guard, and Scout are reasoning
 subagents. Their activity and handoffs are evidence-backed through ServiceNow.
 Ledger is shared audit memory, and IRE is the governed execution engine.
+
+Comprehend presents the specialists in W-R-A-G-S order. Historical ServiceNow
+events with actor `Sentry` remain valid and render as `Guard`.
 
 Model routing and credentials stay in ServiceNow. The frontend does not call an
 LLM provider or store model secrets.
@@ -158,4 +161,3 @@ suite documented in `docs/live-demo-runbook.md`.
   remain human-approved today.
 - Replace coarse health aggregation when richer authoritative ServiceNow health
   dimensions become available.
-

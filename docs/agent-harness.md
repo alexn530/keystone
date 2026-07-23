@@ -3,22 +3,24 @@
 ## Current model
 
 The authoritative agent harness runs in ServiceNow, not in the Next.js browser.
-Mara supervises bounded migration work while Router, Atlas, Scout, Weaver, and
-Sentry provide specialized reasoning and deterministic evidence.
+Mara supervises bounded migration work while Weaver, Router, Atlas, Guard, and
+Scout provide specialized reasoning and deterministic evidence.
 
 ```text
 Mara
+  +-- Weaver: relationship evidence
   +-- Router: next-safe-step routing
   +-- Atlas: class and attribute evidence
+  +-- Guard: confidence and policy gates
   +-- Scout: identity and duplicate evidence
-  +-- Weaver: relationship evidence
-  +-- Sentry: confidence and policy gates
 
 Ledger: shared audit memory
 IRE: governed execution engine
 ```
 
 Ledger and IRE are supporting services, not reasoning subagents.
+The UI uses W-R-A-G-S order. Existing persisted actor `Sentry` is a compatible
+legacy alias for Guard.
 
 ## Runtime ownership
 

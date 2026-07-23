@@ -213,6 +213,11 @@ assert.match(dashboardSource, /Mara and her subagents/, "Comprehend must present
 assert.match(dashboardSource, /Recorded subagent handoffs/, "Comprehend must expose evidence-backed agent handoffs");
 assert.match(dashboardSource, /Shared audit memory/, "Ledger must be presented as shared audit memory");
 assert.match(dashboardSource, /Governed execution engine/, "IRE must be presented as an execution service");
+const rosterSource = dashboardSource.slice(dashboardSource.indexOf("const KNOWN_WORKERS"), dashboardSource.indexOf("const SUBAGENT_NAMES"));
+const wragsOrder = ["Weaver", "Router", "Atlas", "Guard", "Scout"].map(name => rosterSource.indexOf(`name: "${name}"`));
+assert.ok(wragsOrder.every((position, index) => position >= 0 && (index === 0 || position > wragsOrder[index - 1])), "Comprehend specialists must render in W-R-A-G-S order");
+assert.match(rosterSource, /name:\s*"Guard"[\s\S]*actorNames:\s*\["Guard",\s*"Sentry"\]/, "Guard must retain compatibility with historical Sentry events");
+assert.doesNotMatch(rosterSource, /name:\s*"Sentry"/, "Sentry must not remain a user-facing subagent name");
 assert.doesNotMatch(dashboardSource, /name:\s*"Ledger",\s*role:/, "Ledger is not a reasoning subagent");
 assert.doesNotMatch(dashboardSource, /name:\s*"IRE",\s*role:/, "IRE is not a reasoning subagent");
 

@@ -111,7 +111,7 @@ export function normalizeComprehendCis(payload: unknown): ConfigurationItem[] {
           detail: classProvenanceDetail(row, className),
         },
         {
-          label: "Sentry confidence gate",
+          label: "Guard confidence gate",
           value: `${Math.round(confidence * 100)}% · ${gateLabel}`,
           detail: `Deterministic threshold: ${Math.round(SENTRY_THRESHOLD * 100)}%.`,
         },
@@ -396,7 +396,7 @@ function normalizeFix(row: Record<string, unknown>, index: number): HealthFix {
     description: text(row.description ?? row.reason ?? row.recommendation, "Review the supporting finding in ServiceNow.").trim(),
     impact: impact(row.impact ?? row.score_impact ?? row.severity),
     affected: number(row.affected ?? row.count, 0),
-    tool: text(row.tool ?? row.agent, toolForFinding(text(row.type ?? row.title, ""))),
+    tool: displayAgentName(text(row.tool ?? row.agent, toolForFinding(text(row.type ?? row.title, "")))),
     severity: severity(row.severity),
   };
 }
@@ -406,7 +406,11 @@ function toolForFinding(value: string) {
   if (normalized.includes("duplicate")) return "Scout";
   if (normalized.includes("orphan") || normalized.includes("relationship")) return "Weaver";
   if (normalized.includes("class") || normalized.includes("attribute")) return "Atlas";
-  return "Sentry";
+  return "Guard";
+}
+
+function displayAgentName(value: string) {
+  return value.toLowerCase() === "sentry" ? "Guard" : value;
 }
 
 function severity(value: unknown): HealthFix["severity"] {

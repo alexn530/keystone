@@ -2019,7 +2019,7 @@ tbody tr:hover .row-arrow { color: var(--lime); transform: translateX(2px); }
 .adapter-preview-more { color: var(--faint); font-style: italic; justify-content: center; border-left-color: transparent !important; }
 
 /* Worker roster — real named agents (Router / Atlas / Scout / Weaver /
-   Sentry / Ledger / Mara / IRE) that emitted events for this run. Sourced
+   Guard / Ledger / Mara / IRE) that emitted events for this run. Sourced
    from event.source, never invented. */
 .worker-roster { margin: 20px 0; padding: 16px 18px; background: linear-gradient(180deg, rgba(255,255,255,.02), transparent 30%), var(--surface); border: 1px solid var(--line); position: relative; }
 .worker-roster::before, .worker-roster::after { content: ""; position: absolute; width: 4px; height: 4px; border-radius: 50%; top: 6px; background: radial-gradient(circle at 30% 30%, rgba(199, 243, 77, .55), rgba(89, 100, 72, .8) 55%, #0a0c0b 85%); box-shadow: 0 0 0 1px rgba(0, 0, 0, .5); }

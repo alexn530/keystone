@@ -240,7 +240,7 @@ export function LiveOpsView({
       const actor = event.source.trim() || "Unknown actor";
       if (!latest.has(actor)) latest.set(actor, event);
     }
-    const preferredOrder = ["Comprehend", "Router", "Atlas", "Scout", "Weaver", "Sentry", "Ledger"];
+    const preferredOrder = ["Comprehend", "Weaver", "Router", "Atlas", "Guard", "Sentry", "Scout", "Ledger"];
     return Array.from(latest.entries()).sort(([left], [right]) => {
       const leftIndex = preferredOrder.indexOf(left);
       const rightIndex = preferredOrder.indexOf(right);
@@ -324,8 +324,8 @@ export function LiveOpsView({
           <div className="feed" aria-live="polite">
             {newestFirst.map(event => <div className="feed-item" key={event.id}>
               <span className="feed-time" title={event.time}>{displayTime(event.time)}</span>
-              <span className={`agent-tag tone-${eventTone(event)}`}>{event.source}</span>
-              <span className="feed-text"><strong>{event.name}</strong><small>{event.reasoning}</small></span>
+              <span className={`agent-tag tone-${eventTone(event)}`}>{displayAgentName(event.source)}</span>
+              <span className="feed-text"><strong>{event.name.replace(/\bSentry\b/g, "Guard")}</strong><small>{event.reasoning.replace(/\bSentry\b/g, "Guard")}</small></span>
               <span className="feed-meta">
                 <span className={`operation operation-feed tone-${eventTone(event)}`}>{eventLabel(event)}</span>
                 {event.confidence > 0 && <span className="feed-conf">{Math.round(event.confidence * 100)}%</span>}
@@ -343,8 +343,8 @@ export function LiveOpsView({
             {latestByActor.map(([actor, event]) => <div className="board-row" key={actor}>
               <span className={`state-dot ${event.status === "active" ? "working" : ""}`} />
               <div className="board-copy">
-                <strong>{actor}</strong>
-                <span title={event.reasoning}>{event.reasoning || event.name}</span>
+                <strong>{displayAgentName(actor)}</strong>
+                <span title={event.reasoning}>{(event.reasoning || event.name).replace(/\bSentry\b/g, "Guard")}</span>
               </div>
               <span className="board-tag">SEQ {event.seq}</span>
             </div>)}
@@ -368,4 +368,8 @@ export function LiveOpsView({
       </section>
     </>}
   </div>;
+}
+
+function displayAgentName(name: string) {
+  return name.toLowerCase() === "sentry" ? "Guard" : name;
 }
